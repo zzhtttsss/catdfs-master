@@ -1,0 +1,3 @@
+# master 配置
+master:
+  port: ":9099"

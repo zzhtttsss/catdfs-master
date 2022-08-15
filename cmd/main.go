@@ -1,7 +1,8 @@
 package main
 
-import "fmt"
+import "tinydfs-master/internal/model"
 
 func main() {
-	fmt.Print("haha")
+	master := model.MakeNameNode()
+	master.Server()
 }
