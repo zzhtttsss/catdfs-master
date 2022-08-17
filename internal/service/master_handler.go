@@ -18,6 +18,7 @@ var GlobalMasterHandler *MasterHandler
 type MasterHandler struct {
 	GlobalNameNode *model.NameNode
 	pb.UnimplementedRegisterServiceServer
+	pb.UnimplementedHeartbeatServiceServer
 }
 
 //CreateMasterHandler 创建MasterHandler
@@ -26,6 +27,15 @@ func CreateMasterHandler() {
 	GlobalMasterHandler = &MasterHandler{
 		GlobalNameNode: model.CreateNameNode(),
 	}
+}
+
+// Heartbeat 响应由chunkserver调用的rpc
+func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
+	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
+	code := handler.GlobalNameNode.Heartbeat(args.Id)
+	rep := &pb.HeartbeatReply{Code: code}
+	return rep, nil
+
 }
 
 // Register 由DataNode调用该方法，将对应DataNode注册到本NameNode上
@@ -51,6 +61,7 @@ func (handler *MasterHandler) Server() {
 	}
 	server := grpc.NewServer()
 	pb.RegisterRegisterServiceServer(server, handler)
-	logrus.Infof("NameNode is running, listen on %s%s", common.LocalIP, common.MasterPort)
+	pb.RegisterHeartbeatServiceServer(server, handler)
+	logrus.Infof("NameNode is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
 	server.Serve(listener)
 }

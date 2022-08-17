@@ -55,7 +55,7 @@ func (nn *NameNode) Register(ctx context.Context) (string, string, error) {
 		for {
 			<-waitTimer.C
 			nn.DataNodeMap[id].status = common.Waiting
-			logrus.WithContext(ctx).Infof("ID: %s is waiting reconnect", id)
+			logrus.WithContext(ctx).Infof("[Id=%s] Waiting reconnect", id)
 			waitTimer.Stop()
 			dieTimer.Reset(1 * time.Minute)
 		}
@@ -64,9 +64,23 @@ func (nn *NameNode) Register(ctx context.Context) (string, string, error) {
 		<-dieTimer.C
 		nn.DataNodeMap[id].status = common.Died
 		dieTimer.Stop()
-		logrus.WithContext(ctx).Infof("ID: %s is died", id)
+		logrus.WithContext(ctx).Infof("[Id=%s] Died", id)
 	}(ctx)
 
-	logrus.WithContext(ctx).Infof("ID: %s is connected", id)
+	logrus.WithContext(ctx).Infof("[Id=%s] Connected", id)
 	return id, address, nil
+}
+
+// Heartbeat 接收来自chunkserver的心跳，重置计时器
+func (nn *NameNode) Heartbeat(Id string) int32 {
+	if dn, ok := nn.DataNodeMap[Id]; ok {
+		dn.waitTimer.Stop()
+		dn.dieTimer.Stop()
+		dn.waitTimer.Reset(10 * time.Second)
+		if dn.status == common.Waiting {
+			dn.status = common.Alive
+		}
+		return 0
+	}
+	return common.MasterRPCServerFailed
 }
