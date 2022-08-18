@@ -45,7 +45,7 @@ func CreateRootNode() *FileNode {
 }
 
 func (node FileNode) CheckAndGet(path string) (*FileNode, error) {
-	fileNode, stack, isExist := checkAndGetByPath(&node, path, true)
+	fileNode, stack, isExist := getAndLockByPath(&node, path, true)
 	defer unlockAllMutex(stack, true)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
@@ -53,7 +53,7 @@ func (node FileNode) CheckAndGet(path string) (*FileNode, error) {
 	return fileNode, nil
 }
 
-func checkAndGetByPath(node *FileNode, path string, isRead bool) (*FileNode, *list.List, bool) {
+func getAndLockByPath(node *FileNode, path string, isRead bool) (*FileNode, *list.List, bool) {
 	currentNode := node
 	fileNames := strings.Split(path, "/")
 	stack := list.New()
@@ -100,7 +100,7 @@ func (node FileNode) Add(path string, filename string, size int, isFile bool) (*
 		childNodes map[string]*FileNode
 	)
 
-	fileNode, stack, isExist := checkAndGetByPath(&node, path, false)
+	fileNode, stack, isExist := getAndLockByPath(&node, path, false)
 	defer unlockAllMutex(stack, false)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
@@ -124,9 +124,9 @@ func (node FileNode) Add(path string, filename string, size int, isFile bool) (*
 }
 
 func (node FileNode) Move(currentPath string, targetPath string) (*FileNode, error) {
-	fileNode, stack, isExist := checkAndGetByPath(&node, currentPath, false)
+	fileNode, stack, isExist := getAndLockByPath(&node, currentPath, false)
 	defer unlockAllMutex(stack, false)
-	newParentNode, parentStack, isParentExist := checkAndGetByPath(&node, targetPath, false)
+	newParentNode, parentStack, isParentExist := getAndLockByPath(&node, targetPath, false)
 	defer unlockAllMutex(parentStack, false)
 
 	if !isExist {
@@ -145,7 +145,7 @@ func (node FileNode) Move(currentPath string, targetPath string) (*FileNode, err
 }
 
 func (node FileNode) Remove(path string) (*FileNode, error) {
-	fileNode, stack, isExist := checkAndGetByPath(&node, path, false)
+	fileNode, stack, isExist := getAndLockByPath(&node, path, false)
 	defer unlockAllMutex(stack, false)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
@@ -156,8 +156,8 @@ func (node FileNode) Remove(path string) (*FileNode, error) {
 	return fileNode, nil
 }
 
-func (node FileNode) list(path string) ([]*FileNode, error) {
-	fileNode, stack, isExist := checkAndGetByPath(&node, path, true)
+func (node FileNode) List(path string) ([]*FileNode, error) {
+	fileNode, stack, isExist := getAndLockByPath(&node, path, true)
 	defer unlockAllMutex(stack, true)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
@@ -165,6 +165,16 @@ func (node FileNode) list(path string) ([]*FileNode, error) {
 
 	fileNodes := make([]*FileNode, len(fileNode.ChildNodes))
 	return fileNodes, nil
+}
+
+func (node FileNode) Rename(path string, newName string) (*FileNode, error) {
+	fileNode, stack, isExist := getAndLockByPath(&node, path, false)
+	defer unlockAllMutex(stack, false)
+	if !isExist {
+		return nil, fmt.Errorf("path not exist, path : %s", path)
+	}
+	fileNode.FileName = newName
+	return fileNode, nil
 }
 
 // 缓存池，最近用过的塞进去，超时就扔出去

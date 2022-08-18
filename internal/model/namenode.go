@@ -11,17 +11,17 @@ import (
 )
 
 type NameNode struct {
-	DataNodeMap map[string]*DataNode
-	Namespace   *Namespace
-	mu          *sync.Mutex
+	DataNodeMap     map[string]*DataNode
+	GlobalNamespace *Namespace
+	mu              *sync.Mutex
 }
 
 //CreateNameNode 创建NameNode
 func CreateNameNode() *NameNode {
 	return &NameNode{
-		DataNodeMap: make(map[string]*DataNode),
-		Namespace:   CreateNamespace(),
-		mu:          &sync.Mutex{},
+		DataNodeMap:     make(map[string]*DataNode),
+		GlobalNamespace: CreateNamespace(),
+		mu:              &sync.Mutex{},
 	}
 }
 
