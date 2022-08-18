@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"google.golang.org/grpc/peer"
 	"sync"
 	"time"
@@ -41,8 +42,8 @@ func (nn *NameNode) Register(ctx context.Context) (string, string, error) {
 	address = p.Addr.String()
 
 	// 定时器，10秒无心跳则等待重连，十分钟无心跳则判定离线
-	waitTimer := time.NewTimer(10 * time.Second)
-	dieTimer := time.NewTimer(1 * time.Minute)
+	waitTimer := time.NewTimer(time.Duration(viper.GetInt(common.ChunkWaitTime)) * time.Second)
+	dieTimer := time.NewTimer(time.Duration(viper.GetInt(common.ChunkDieTime)) * time.Second)
 	nn.DataNodeMap[id] = &DataNode{
 		Id:        id,
 		status:    common.Alive,
