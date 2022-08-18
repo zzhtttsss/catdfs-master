@@ -12,6 +12,7 @@ import (
 
 type NameNode struct {
 	DataNodeMap map[string]*DataNode
+	Namespace   *Namespace
 	mu          *sync.Mutex
 }
 
@@ -19,6 +20,7 @@ type NameNode struct {
 func CreateNameNode() *NameNode {
 	return &NameNode{
 		DataNodeMap: make(map[string]*DataNode),
+		Namespace:   CreateNamespace(),
 		mu:          &sync.Mutex{},
 	}
 }
@@ -43,13 +45,14 @@ func (nn *NameNode) Register(ctx context.Context) (string, string, error) {
 	// 定时器，10秒无心跳则等待重连，十分钟无心跳则判定离线
 	waitTimer := time.NewTimer(10 * time.Second)
 	dieTimer := time.NewTimer(1 * time.Minute)
+	nn.mu.Lock()
 	nn.DataNodeMap[id] = &DataNode{
 		Id:        id,
 		status:    common.Alive,
 		waitTimer: waitTimer,
 		dieTimer:  dieTimer,
 	}
-
+	nn.mu.Unlock()
 	dieTimer.Stop()
 	go func(ctx context.Context) {
 		for {
