@@ -2,3 +2,8 @@
 master:
   addr: "127.0.0.1"
   port: ":9099"
+
+# chunk server 配置
+chunk:
+  waitTime: 10    # chunk server等待时间
+  dieTime: 60     # chunk server死亡时间
