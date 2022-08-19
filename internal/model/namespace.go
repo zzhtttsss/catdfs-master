@@ -8,9 +8,12 @@ import (
 )
 
 const (
-	mb           = 1048576
-	chunkSize    = 64
-	rootFileName = ""
+	kb              = 1024
+	mb              = 1048576
+	chunkByteNUm    = 1024
+	chunkSize       = 1
+	rootFileName    = ""
+	pathSplitString = "/"
 )
 
 type Namespace struct {
@@ -29,6 +32,7 @@ type FileNode struct {
 	ParentNode *FileNode
 	ChildNodes map[string]*FileNode
 	Chunks     []string
+	Size       int
 	IsFile     bool
 	mu         *sync.RWMutex
 }
@@ -55,15 +59,11 @@ func (node FileNode) CheckAndGet(path string) (*FileNode, error) {
 
 func getAndLockByPath(node *FileNode, path string, isRead bool) (*FileNode, *list.List, bool) {
 	currentNode := node
-	fileNames := strings.Split(path, "/")
+	fileNames := strings.Split(path, pathSplitString)
 	stack := list.New()
 
 	for _, name := range fileNames {
-		if isRead {
-			currentNode.mu.RLock()
-		} else {
-			currentNode.mu.Lock()
-		}
+		currentNode.mu.RLock()
 		stack.PushBack(currentNode)
 		nextNode, exist := currentNode.ChildNodes[name]
 		if !exist {
@@ -82,14 +82,19 @@ func getAndLockByPath(node *FileNode, path string, isRead bool) (*FileNode, *lis
 }
 
 func unlockAllMutex(stack *list.List, isRead bool) {
+	firstElement := stack.Back()
+	firstNode := firstElement.Value.(FileNode)
+	if isRead {
+		firstNode.mu.RUnlock()
+	} else {
+		firstNode.mu.Unlock()
+	}
+	stack.Remove(firstElement)
+
 	for stack.Len() != 0 {
 		element := stack.Back()
 		node := element.Value.(FileNode)
-		if isRead {
-			node.mu.RUnlock()
-		} else {
-			node.mu.Unlock()
-		}
+		node.mu.RUnlock()
 		stack.Remove(element)
 	}
 }
@@ -106,7 +111,7 @@ func (node FileNode) Add(path string, filename string, size int, isFile bool) (*
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
 	if isFile {
-		chunks = make([]string, size/(chunkSize*mb))
+		chunks = make([]string, size/(chunkSize*chunkByteNUm))
 	} else {
 		childNodes = make(map[string]*FileNode)
 	}
@@ -116,6 +121,7 @@ func (node FileNode) Add(path string, filename string, size int, isFile bool) (*
 		ParentNode: fileNode,
 		ChildNodes: childNodes,
 		Chunks:     chunks,
+		Size:       size,
 		IsFile:     isFile,
 		mu:         &sync.RWMutex{},
 	}
