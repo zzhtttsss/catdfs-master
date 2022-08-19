@@ -12,15 +12,17 @@ import (
 )
 
 type NameNode struct {
-	DataNodeMap map[string]*DataNode
-	mu          *sync.Mutex
+	DataNodeMap     map[string]*DataNode
+	GlobalNamespace *Namespace
+	mu              *sync.Mutex
 }
 
 //CreateNameNode 创建NameNode
 func CreateNameNode() *NameNode {
 	return &NameNode{
-		DataNodeMap: make(map[string]*DataNode),
-		mu:          &sync.Mutex{},
+		DataNodeMap:     make(map[string]*DataNode),
+		GlobalNamespace: CreateNamespace(),
+		mu:              &sync.Mutex{},
 	}
 }
 
@@ -42,6 +44,7 @@ func (nn *NameNode) Register(ctx context.Context) (string, string, error) {
 	address = p.Addr.String()
 
 	// 定时器，10秒无心跳则等待重连，十分钟无心跳则判定离线
+	nn.mu.Lock()
 	waitTimer := time.NewTimer(time.Duration(viper.GetInt(common.ChunkWaitTime)) * time.Second)
 	dieTimer := time.NewTimer(time.Duration(viper.GetInt(common.ChunkDieTime)) * time.Second)
 	nn.DataNodeMap[id] = &DataNode{
@@ -50,7 +53,7 @@ func (nn *NameNode) Register(ctx context.Context) (string, string, error) {
 		waitTimer: waitTimer,
 		dieTimer:  dieTimer,
 	}
-
+	nn.mu.Unlock()
 	dieTimer.Stop()
 	go func(ctx context.Context) {
 		for {
