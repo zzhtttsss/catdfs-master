@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
+	"tinydfs-base/util"
 )
 
 const (
-	kb              = 1024
-	mb              = 1048576
-	chunkByteNUm    = 1024
-	chunkSize       = 1
-	rootFileName    = ""
-	pathSplitString = "/"
+	kb               = 1024
+	mb               = 1048576
+	chunkByteNum     = 1024
+	chunkSize        = 1
+	rootFileName     = ""
+	pathSplitString  = "/"
+	deleteFilePrefix = "delete"
 )
 
 type Namespace struct {
@@ -28,22 +31,23 @@ func CreateNamespace() *Namespace {
 }
 
 type FileNode struct {
+	Id         string
 	FileName   string
-	ParentNode *FileNode
-	ChildNodes map[string]*FileNode
+	parentNode *FileNode
+	childNodes map[string]*FileNode
 	Chunks     []string
 	Size       int
 	IsFile     bool
+	DelTime    *time.Time
+	IsDel      bool
 	mu         *sync.RWMutex
 }
 
 func CreateRootNode() *FileNode {
 	return &FileNode{
+		Id:         util.GenerateUUIDString(),
 		FileName:   rootFileName,
-		ParentNode: nil,
-		ChildNodes: make(map[string]*FileNode),
-		Chunks:     nil,
-		IsFile:     false,
+		childNodes: make(map[string]*FileNode),
 		mu:         &sync.RWMutex{},
 	}
 }
@@ -65,7 +69,7 @@ func getAndLockByPath(node *FileNode, path string, isRead bool) (*FileNode, *lis
 	for _, name := range fileNames {
 		currentNode.mu.RLock()
 		stack.PushBack(currentNode)
-		nextNode, exist := currentNode.ChildNodes[name]
+		nextNode, exist := currentNode.childNodes[name]
 		if !exist {
 			return nil, stack, false
 		}
@@ -111,22 +115,24 @@ func (node FileNode) Add(path string, filename string, size int, isFile bool) (*
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
 	if isFile {
-		chunks = make([]string, size/(chunkSize*chunkByteNUm))
+		chunks = make([]string, size/(chunkSize*chunkByteNum))
 	} else {
 		childNodes = make(map[string]*FileNode)
 	}
-
 	newNode := &FileNode{
+		Id:         util.GenerateUUIDString(),
 		FileName:   filename,
-		ParentNode: fileNode,
-		ChildNodes: childNodes,
+		parentNode: fileNode,
+		childNodes: childNodes,
 		Chunks:     chunks,
 		Size:       size,
 		IsFile:     isFile,
+		IsDel:      false,
+		DelTime:    nil,
 		mu:         &sync.RWMutex{},
 	}
-	fileNode.ChildNodes[filename] = newNode
-	return nil, nil
+	fileNode.childNodes[filename] = newNode
+	return newNode, nil
 }
 
 func (node FileNode) Move(currentPath string, targetPath string) (*FileNode, error) {
@@ -140,13 +146,13 @@ func (node FileNode) Move(currentPath string, targetPath string) (*FileNode, err
 	} else if !isParentExist {
 		return nil, fmt.Errorf("target path not exist, path : %s", targetPath)
 	}
-	if newParentNode.ChildNodes[fileNode.FileName] != nil {
+	if newParentNode.childNodes[fileNode.FileName] != nil {
 		return nil, fmt.Errorf("target path already has file with the same name, filename : %s", fileNode.FileName)
 	}
 
-	newParentNode.ChildNodes[fileNode.FileName] = fileNode
-	delete(fileNode.ParentNode.ChildNodes, fileNode.FileName)
-	fileNode.ParentNode = newParentNode
+	newParentNode.childNodes[fileNode.FileName] = fileNode
+	delete(fileNode.parentNode.childNodes, fileNode.FileName)
+	fileNode.parentNode = newParentNode
 	return fileNode, nil
 }
 
@@ -156,9 +162,10 @@ func (node FileNode) Remove(path string) (*FileNode, error) {
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-
-	delete(fileNode.ParentNode.ChildNodes, fileNode.FileName)
-	fileNode.ParentNode = nil
+	fileNode.FileName = deleteFilePrefix + util.GenerateUUIDString()
+	fileNode.IsDel = true
+	delTime := time.Now()
+	fileNode.DelTime = &delTime
 	return fileNode, nil
 }
 
@@ -169,7 +176,12 @@ func (node FileNode) List(path string) ([]*FileNode, error) {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
 
-	fileNodes := make([]*FileNode, len(fileNode.ChildNodes))
+	fileNodes := make([]*FileNode, len(fileNode.childNodes))
+	nodeIndex := 0
+	for _, n := range fileNode.childNodes {
+		fileNodes[nodeIndex] = n
+		nodeIndex++
+	}
 	return fileNodes, nil
 }
 
@@ -179,8 +191,13 @@ func (node FileNode) Rename(path string, newName string) (*FileNode, error) {
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
+
+	delete(fileNode.parentNode.childNodes, fileNode.FileName)
 	fileNode.FileName = newName
+	fileNode.parentNode.childNodes[fileNode.FileName] = fileNode
+	if fileNode.IsDel {
+		fileNode.IsDel = false
+		fileNode.DelTime = nil
+	}
 	return fileNode, nil
 }
-
-// 缓存池，最近用过的塞进去，超时就扔出去
