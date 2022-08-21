@@ -36,7 +36,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
 	err := handler.GlobalNameNode.Heartbeat(args.Id)
 	if err != nil {
-		logrus.Errorf("fail to heartbeat, error code: %v, error detail: %s,", common.MasterHeartbeatFailed, err.Error())
+		logrus.Errorf("Fail to heartbeat, error code: %v, error detail: %s,", common.MasterHeartbeatFailed, err.Error())
 		details, _ := status.New(codes.NotFound, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterHeartbeatFailed,
 			Msg:  err.Error(),
@@ -52,7 +52,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterArgs) (*pb.DNRegisterReply, error) {
 	id, address, err := handler.GlobalNameNode.Register(ctx)
 	if err != nil {
-		logrus.Errorf("fail to register, error code: %v, error detail: %s,", common.MasterRegisterFailed, err.Error())
+		logrus.Errorf("Fail to register, error code: %v, error detail: %s,", common.MasterRegisterFailed, err.Error())
 		details, _ := status.New(codes.NotFound, "").WithDetails(&pb.RPCError{
 			Code: common.MasterRegisterFailed,
 			Msg:  err.Error(),
@@ -69,7 +69,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 func (handler *MasterHandler) Server() {
 	listener, err := net.Listen(common.TCP, viper.GetString(common.MasterPort))
 	if err != nil {
-		logrus.Errorf("fail to server, error code: %v, error detail: %s,", common.MasterRPCServerFailed, err.Error())
+		logrus.Errorf("Fail to server, error code: %v, error detail: %s,", common.MasterRPCServerFailed, err.Error())
 		os.Exit(1)
 	}
 	server := grpc.NewServer()

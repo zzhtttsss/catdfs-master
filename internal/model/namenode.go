@@ -29,7 +29,7 @@ func CreateNameNode() *NameNode {
 
 type DataNode struct {
 	Id        string
-	status    int // 0 died ; 1 status ; 2 waiting
+	status    int // 0 died ; 1 alive ; 2 waiting
 	waitTimer *time.Timer
 	dieTimer  *time.Timer
 }
@@ -43,7 +43,7 @@ func (nn *NameNode) Register(ctx context.Context) (string, string, error) {
 	p, _ := peer.FromContext(ctx)
 	id = uuid.NewString()
 	address = p.Addr.String()
-	logrus.WithContext(ctx).Info("receive register request from %s", address)
+	logrus.WithContext(ctx).Info("Receive register request from %s", address)
 
 	// 定时器，10秒无心跳则等待重连，十分钟无心跳则判定离线
 	nn.mu.Lock()
