@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -42,6 +43,7 @@ func (nn *NameNode) Register(ctx context.Context) (string, string, error) {
 	p, _ := peer.FromContext(ctx)
 	id = uuid.NewString()
 	address = p.Addr.String()
+	logrus.WithContext(ctx).Info("receive register request from %s", address)
 
 	// 定时器，10秒无心跳则等待重连，十分钟无心跳则判定离线
 	nn.mu.Lock()
@@ -76,7 +78,7 @@ func (nn *NameNode) Register(ctx context.Context) (string, string, error) {
 }
 
 // Heartbeat 接收来自chunkserver的心跳，重置计时器
-func (nn *NameNode) Heartbeat(Id string) int32 {
+func (nn *NameNode) Heartbeat(Id string) error {
 	if dn, ok := nn.DataNodeMap[Id]; ok {
 		dn.waitTimer.Stop()
 		dn.dieTimer.Stop()
@@ -84,7 +86,7 @@ func (nn *NameNode) Heartbeat(Id string) int32 {
 		if dn.status == common.Waiting {
 			dn.status = common.Alive
 		}
-		return 0
+		return nil
 	}
-	return common.MasterRPCServerFailed
+	return fmt.Errorf("datanode %s not exist", Id)
 }
