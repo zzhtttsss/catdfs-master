@@ -17,6 +17,7 @@ const (
 	rootFileName     = ""
 	pathSplitString  = "/"
 	deleteFilePrefix = "delete"
+	replicateNum     = 3
 )
 
 type Namespace struct {
@@ -31,16 +32,17 @@ func CreateNamespace() *Namespace {
 }
 
 type FileNode struct {
-	Id         string
-	FileName   string
-	parentNode *FileNode
-	childNodes map[string]*FileNode
-	Chunks     []string
-	Size       int
-	IsFile     bool
-	DelTime    *time.Time
-	IsDel      bool
-	mu         *sync.RWMutex
+	Id           string
+	FileName     string
+	parentNode   *FileNode
+	childNodes   map[string]*FileNode
+	Chunks       []*Chunk
+	Size         int64
+	IsFile       bool
+	DelTime      *time.Time
+	IsDel        bool
+	mu           *sync.RWMutex
+	LastLockTime time.Time
 }
 
 func CreateRootNode() *FileNode {
@@ -52,9 +54,14 @@ func CreateRootNode() *FileNode {
 	}
 }
 
+type Chunk struct {
+	Id        string
+	dataNodes []string
+}
+
 func (node FileNode) CheckAndGet(path string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(&node, path, true)
-	defer unlockAllMutex(stack, true)
+	defer UnlockAllMutex(stack, true)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
@@ -68,6 +75,7 @@ func getAndLockByPath(node *FileNode, path string, isRead bool) (*FileNode, *lis
 
 	for _, name := range fileNames {
 		currentNode.mu.RLock()
+		currentNode.LastLockTime = time.Now()
 		stack.PushBack(currentNode)
 		nextNode, exist := currentNode.childNodes[name]
 		if !exist {
@@ -85,7 +93,7 @@ func getAndLockByPath(node *FileNode, path string, isRead bool) (*FileNode, *lis
 	return currentNode, stack, true
 }
 
-func unlockAllMutex(stack *list.List, isRead bool) {
+func UnlockAllMutex(stack *list.List, isRead bool) {
 	firstElement := stack.Back()
 	firstNode := firstElement.Value.(FileNode)
 	if isRead {
@@ -103,43 +111,87 @@ func unlockAllMutex(stack *list.List, isRead bool) {
 	}
 }
 
-func (node FileNode) Add(path string, filename string, size int, isFile bool) (*FileNode, error) {
+func (node FileNode) Add(path string, filename string, size int64, isFile bool) (*FileNode, error) {
 	var (
-		chunks     []string
+		chunks     []*Chunk
 		childNodes map[string]*FileNode
 	)
 
 	fileNode, stack, isExist := getAndLockByPath(&node, path, false)
-	defer unlockAllMutex(stack, false)
+	defer UnlockAllMutex(stack, false)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
 	if isFile {
-		chunks = make([]string, size/(chunkSize*chunkByteNum))
+		chunks = initChunks(size)
 	} else {
 		childNodes = make(map[string]*FileNode)
 	}
 	newNode := &FileNode{
-		Id:         util.GenerateUUIDString(),
-		FileName:   filename,
-		parentNode: fileNode,
-		childNodes: childNodes,
-		Chunks:     chunks,
-		Size:       size,
-		IsFile:     isFile,
-		IsDel:      false,
-		DelTime:    nil,
-		mu:         &sync.RWMutex{},
+		Id:           util.GenerateUUIDString(),
+		FileName:     filename,
+		parentNode:   fileNode,
+		childNodes:   childNodes,
+		Chunks:       chunks,
+		Size:         size,
+		IsFile:       isFile,
+		IsDel:        false,
+		DelTime:      nil,
+		mu:           &sync.RWMutex{},
+		LastLockTime: time.Now(),
 	}
 	fileNode.childNodes[filename] = newNode
 	return newNode, nil
 }
 
+func (node FileNode) LockAndAdd(path string, filename string, size int64, isFile bool) (*FileNode, *list.List, error) {
+	var (
+		chunks     []*Chunk
+		childNodes map[string]*FileNode
+	)
+
+	fileNode, stack, isExist := getAndLockByPath(&node, path, false)
+	if !isExist {
+		return nil, nil, fmt.Errorf("path not exist, path : %s", path)
+	}
+	if isFile {
+		chunks = initChunks(size)
+	} else {
+		childNodes = make(map[string]*FileNode)
+	}
+	newNode := &FileNode{
+		Id:           util.GenerateUUIDString(),
+		FileName:     filename,
+		parentNode:   fileNode,
+		childNodes:   childNodes,
+		Chunks:       chunks,
+		Size:         size,
+		IsFile:       isFile,
+		IsDel:        false,
+		DelTime:      nil,
+		mu:           &sync.RWMutex{},
+		LastLockTime: time.Now(),
+	}
+	fileNode.childNodes[filename] = newNode
+	return newNode, stack, nil
+}
+
+func initChunks(size int64) []*Chunk {
+	chunks := make([]*Chunk, size/(chunkSize*chunkByteNum))
+	for i := 0; i < len(chunks); i++ {
+		chunks[i] = &Chunk{
+			Id:        util.GenerateUUIDString(),
+			dataNodes: make([]string, replicateNum),
+		}
+	}
+	return chunks
+}
+
 func (node FileNode) Move(currentPath string, targetPath string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(&node, currentPath, false)
-	defer unlockAllMutex(stack, false)
+	defer UnlockAllMutex(stack, false)
 	newParentNode, parentStack, isParentExist := getAndLockByPath(&node, targetPath, false)
-	defer unlockAllMutex(parentStack, false)
+	defer UnlockAllMutex(parentStack, false)
 
 	if !isExist {
 		return nil, fmt.Errorf("current path not exist, path : %s", currentPath)
@@ -158,7 +210,7 @@ func (node FileNode) Move(currentPath string, targetPath string) (*FileNode, err
 
 func (node FileNode) Remove(path string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(&node, path, false)
-	defer unlockAllMutex(stack, false)
+	defer UnlockAllMutex(stack, false)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
@@ -171,7 +223,7 @@ func (node FileNode) Remove(path string) (*FileNode, error) {
 
 func (node FileNode) List(path string) ([]*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(&node, path, true)
-	defer unlockAllMutex(stack, true)
+	defer UnlockAllMutex(stack, true)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
@@ -187,7 +239,7 @@ func (node FileNode) List(path string) ([]*FileNode, error) {
 
 func (node FileNode) Rename(path string, newName string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(&node, path, false)
-	defer unlockAllMutex(stack, false)
+	defer UnlockAllMutex(stack, false)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}

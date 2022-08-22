@@ -1,6 +1,7 @@
 package model
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"github.com/google/uuid"
@@ -10,6 +11,16 @@ import (
 	"sync"
 	"time"
 	"tinydfs-base/common"
+	"tinydfs-base/protocol/pb"
+)
+
+const (
+	IsFile4File = true
+)
+
+var (
+	unlockFileNodes = make(map[string]*list.List)
+	mu              = &sync.Mutex{}
 )
 
 type NameNode struct {
@@ -89,4 +100,15 @@ func (nn *NameNode) Heartbeat(Id string) error {
 		return nil
 	}
 	return fmt.Errorf("datanode %s not exist", Id)
+}
+
+func (nn *NameNode) CheckArgs4Add(args *pb.CheckArgs4AddArgs) (string, error) {
+	fileNode, stack, err := nn.GlobalNamespace.Root.LockAndAdd(args.Path, args.FileName, args.Size, IsFile4File)
+	mu.Lock()
+	unlockFileNodes[fileNode.Id] = stack
+	mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	return fileNode.Id, nil
 }

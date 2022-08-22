@@ -21,6 +21,7 @@ type MasterHandler struct {
 	GlobalNameNode *model.NameNode
 	pb.UnimplementedRegisterServiceServer
 	pb.UnimplementedHeartbeatServiceServer
+	pb.UnimplementedMasterAddServer
 }
 
 //CreateMasterHandler 创建MasterHandler
@@ -31,7 +32,7 @@ func CreateMasterHandler() {
 	}
 }
 
-// Heartbeat 响应由chunkserver调用的rpc
+// Heartbeat 由Chunkserver调用该方法，维持心跳
 func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
 	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
 	err := handler.GlobalNameNode.Heartbeat(args.Id)
@@ -48,7 +49,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 
 }
 
-// Register 由DataNode调用该方法，将对应DataNode注册到本NameNode上
+// Register 由Chunkserver调用该方法，将对应DataNode注册到本NameNode上
 func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterArgs) (*pb.DNRegisterReply, error) {
 	id, address, err := handler.GlobalNameNode.Register(ctx)
 	if err != nil {
@@ -64,6 +65,32 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		Addr: address,
 	}
 	return rep, nil
+}
+
+// CheckArgs4Add 由Client调用该方法，检查Add操作中用户输入的路径和文件名是否合法
+func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
+	fileNodeId, err := handler.GlobalNameNode.CheckArgs4Add(args)
+	if err != nil {
+		logrus.Errorf("Fail to check path and filename for add operation, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
+		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckArgs4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.CheckArgs4AddReply{
+		FileNodeId: fileNodeId,
+	}
+	return rep, nil
+
+}
+
+// GetDataNodes4Add 由Client调用该方法，得到存储一个chunk的多个Chunkserver
+func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.GetDataNodes4AddArgs) (*pb.GetDataNodes4AddReply, error) {
+	rep := &pb.GetDataNodes4AddReply{}
+	return rep, nil
+
 }
 
 func (handler *MasterHandler) Server() {
