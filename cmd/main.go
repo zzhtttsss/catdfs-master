@@ -1,14 +1,13 @@
 package main
 
 import (
-	"tinydfs-master/internal/service"
+	"tinydfs-master/internal"
 )
 
 func init() {
-	// model.CreateNameNode()
-	service.CreateMasterHandler()
+	internal.CreateMasterHandler()
 }
 
 func main() {
-	service.GlobalMasterHandler.Server()
+	internal.GlobalMasterHandler.Server()
 }
