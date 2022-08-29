@@ -3,12 +3,14 @@ package internal
 import "sync"
 
 var (
+	// Store all Chunk, using id as the key
 	chunksMap        = make(map[string]*Chunk)
 	updateChunksLock = &sync.RWMutex{}
 )
 
 type Chunk struct {
-	Id          string
+	Id string
+	// id of all DataNode storing this Chunk.
 	dataNodes   []string
 	primaryNode string
 }

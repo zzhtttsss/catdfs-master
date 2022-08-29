@@ -21,22 +21,29 @@ const (
 )
 
 var (
+	// The root of the directory tree.
 	root = &FileNode{
 		Id:             util.GenerateUUIDString(),
 		FileName:       rootFileName,
 		childNodes:     make(map[string]*FileNode),
 		updateNodeLock: &sync.RWMutex{},
 	}
+	// Store all locked nodes.
+	// All nodes locked by an operation will be placed on a stack as the value of the map.
+	// The id of the FileNode being operated is used as the key.
 	unlockedFileNodes = make(map[string]*list.List)
 	fileNodesMapLock  = &sync.Mutex{}
 )
 
 type FileNode struct {
-	Id             string
-	FileName       string
-	parentNode     *FileNode
-	childNodes     map[string]*FileNode
-	Chunks         []string
+	Id         string
+	FileName   string
+	parentNode *FileNode
+	// all child node of this node, using FileName as key
+	childNodes map[string]*FileNode
+	// id of all Chunk in this file.
+	Chunks []string
+	// size of the file. Use bytes as the unit of measurement which means 1kb will be 1024.
 	Size           int64
 	IsFile         bool
 	DelTime        *time.Time

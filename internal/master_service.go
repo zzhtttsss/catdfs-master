@@ -18,7 +18,6 @@ const (
 	replicateNum = 3
 )
 
-// DoRegister 由chunkserver通过rpc调用该方法，将对应DataNode注册到本NameNode上
 func DoRegister(ctx context.Context) (string, string, error) {
 	var (
 		id      string
@@ -62,7 +61,6 @@ func DoRegister(ctx context.Context) (string, string, error) {
 	return id, address, nil
 }
 
-// DoHeartbeat 接收来自chunkserver的心跳，重置计时器
 func DoHeartbeat(Id string) error {
 	if dataNode := GetDataNode(Id); dataNode != nil {
 		dataNode.waitTimer.Stop()
