@@ -6,14 +6,17 @@ import (
 )
 
 var (
+	// Store all DataNode, using id as the key
 	dataNodeMap   = make(map[string]*DataNode)
 	updateMapLock = sync.RWMutex{}
 )
 
 type DataNode struct {
-	Id        string
-	status    int // 0 died ; 1 alive ; 2 waiting
-	Address   string
+	Id string
+	// 0 died; 1 alive; 2 waiting
+	status  int
+	Address string
+	// id of all Chunk in this file.
 	Chunks    []string
 	waitTimer *time.Timer
 	dieTimer  *time.Timer

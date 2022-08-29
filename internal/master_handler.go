@@ -62,7 +62,8 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	return rep, nil
 }
 
-// CheckArgs4Add 由Client调用该方法，检查Add操作中用户输入的路径和文件名是否合法
+// CheckArgs4Add Called by client.
+// Check whether the path and file name entered by the user in the Add operation are legal.
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
 	fileNodeId, chunkNum, err := DoCheckArgs4Add(args)
@@ -82,7 +83,8 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 
 }
 
-// GetDataNodes4Add 由Client调用该方法，得到存储一个chunk的多个Chunkserver
+// GetDataNodes4Add Called by client.
+// Allocate some DataNode to store a Chunk and select the primary DataNode
 func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.GetDataNodes4AddArgs) (*pb.GetDataNodes4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for get dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
 	dataNodes, primaryNode, err := DoGetDataNodes4Add(args.FileNodeId, args.ChunkIndex)
@@ -111,6 +113,7 @@ func (handler *MasterHandler) Server() {
 	server := grpc.NewServer()
 	pb.RegisterRegisterServiceServer(server, handler)
 	pb.RegisterHeartbeatServiceServer(server, handler)
+	pb.RegisterMasterAddServer(server, handler)
 	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
 	server.Serve(listener)
 }
