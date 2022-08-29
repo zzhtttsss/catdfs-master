@@ -169,3 +169,77 @@ func TestInitChunks(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveFileNode(t *testing.T) {
+	test := map[string]*struct {
+		initRoot    func(path string)
+		path        string
+		expectIsDel bool
+	}{
+		"FileNotExist": {
+			initRoot: nil,
+			path:     "/a/b/c.txt",
+		},
+		"FileExist": {
+			initRoot:    initRoot,
+			path:        "/a/b/c.txt",
+			expectIsDel: true,
+		},
+	}
+	for name, c := range test {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				root.childNodes = map[string]*FileNode{}
+			}()
+			if c.initRoot != nil {
+				c.initRoot(c.path)
+			}
+			node, err := RemoveFileNode(c.path)
+			if c.initRoot == nil {
+				assert.Nil(t, node)
+				assert.Error(t, err)
+			} else {
+				assert.Equal(t, c.expectIsDel, node.IsDel)
+			}
+		})
+	}
+}
+
+func TestListFileNode(t *testing.T) {
+	test := map[string]*struct {
+		initRoot        func(path string)
+		directory       string
+		path            string
+		expectFileNames []string
+	}{
+		"FileNotExist": {
+			initRoot: nil,
+			path:     "/a/b/",
+		},
+		"FileExist": {
+			initRoot:        initRoot,
+			directory:       "/a/b/c.txt",
+			path:            "/a/b/",
+			expectFileNames: []string{"c.txt"},
+		},
+	}
+	for name, c := range test {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				root.childNodes = map[string]*FileNode{}
+			}()
+			if c.initRoot != nil {
+				c.initRoot(c.directory)
+			}
+			nodes, err := ListFileNode(c.path)
+			if c.initRoot == nil {
+				assert.Nil(t, nodes)
+				assert.Error(t, err)
+			} else {
+				for i, s := range nodes {
+					assert.Equal(t, c.expectFileNames[i], s.FileName)
+				}
+			}
+		})
+	}
+}

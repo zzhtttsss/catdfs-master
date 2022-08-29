@@ -192,14 +192,17 @@ func MoveFileNode(currentPath string, targetPath string) (*FileNode, error) {
 
 func RemoveFileNode(path string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
-	defer UnlockAllMutex(stack, false)
 	if !isExist {
+		// 假如目录树只有 /a/b  删除路径为 /a/b/c.txt
+		// 则stack中只会对 ""  "a" "b"加读锁
+		defer UnlockAllMutex(stack, true)
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
+	defer UnlockAllMutex(stack, false)
 	fileNode.FileName = deleteFilePrefix + util.GenerateUUIDString()
 	fileNode.IsDel = true
 	delTime := time.Now()
-	fileNode.DelTime = &delTime
+	fileNode.DelTime = &(delTime)
 	return fileNode, nil
 }
 
