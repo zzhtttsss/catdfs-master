@@ -3,6 +3,7 @@ package internal
 import (
 	"container/list"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -153,7 +154,8 @@ func LockAndAddFileNode(path string, filename string, size int64, isFile bool) (
 }
 
 func initChunks(size int64, id string) []string {
-	chunks := make([]string, size/(chunkSize*chunkByteNum))
+	nums := int(math.Ceil(float64(size) / float64(chunkSize) / float64(chunkByteNum)))
+	chunks := make([]string, nums)
 	for i := 0; i < len(chunks); i++ {
 		chunks[i] = id + strconv.Itoa(i)
 	}
