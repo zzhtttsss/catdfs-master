@@ -56,10 +56,12 @@ func CheckAndGetFileNode(path string) (*FileNode, error) {
 
 func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 	currentNode := root
+	path = strings.TrimRight(path, pathSplitString)
 	fileNames := strings.Split(path, pathSplitString)
 	stack := list.New()
 
-	for _, name := range fileNames {
+	// fileNames的第一个是根目录，不存在子node包含根目录的节点，所以[1:]
+	for _, name := range fileNames[1:] {
 		currentNode.updateNodeLock.RLock()
 		currentNode.LastLockTime = time.Now()
 		stack.PushBack(currentNode)
@@ -81,7 +83,7 @@ func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 
 func UnlockAllMutex(stack *list.List, isRead bool) {
 	firstElement := stack.Back()
-	firstNode := firstElement.Value.(FileNode)
+	firstNode := firstElement.Value.(*FileNode)
 	if isRead {
 		firstNode.updateNodeLock.RUnlock()
 	} else {
@@ -91,7 +93,7 @@ func UnlockAllMutex(stack *list.List, isRead bool) {
 
 	for stack.Len() != 0 {
 		element := stack.Back()
-		node := element.Value.(FileNode)
+		node := element.Value.(*FileNode)
 		node.updateNodeLock.RUnlock()
 		stack.Remove(element)
 	}
