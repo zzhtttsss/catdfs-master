@@ -55,27 +55,27 @@ type FileNode struct {
 
 func CheckAndGetFileNode(path string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, true)
-	defer UnlockAllMutex(stack, true)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
+	defer UnlockAllMutex(stack, true)
 	return fileNode, nil
 }
 
 func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 	currentNode := root
-	path = strings.TrimRight(path, pathSplitString)
+	path = strings.Trim(path, pathSplitString)
 	fileNames := strings.Split(path, pathSplitString)
 	stack := list.New()
 
-	// fileNames的第一个是根目录，不存在子node包含根目录的节点，所以[1:]
-	for _, name := range fileNames[1:] {
+	for _, name := range fileNames {
 		currentNode.updateNodeLock.RLock()
 		currentNode.LastLockTime = time.Now()
 		stack.PushBack(currentNode)
 		nextNode, exist := currentNode.childNodes[name]
 		if !exist {
-			return nil, stack, false
+			UnlockAllMutex(stack, true)
+			return nil, nil, false
 		}
 		currentNode = nextNode
 	}
@@ -109,10 +109,11 @@ func UnlockAllMutex(stack *list.List, isRead bool) {
 
 func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
-	defer UnlockAllMutex(stack, false)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
+	defer UnlockAllMutex(stack, false)
+
 	id := util.GenerateUUIDString()
 	newNode := &FileNode{
 		Id:             id,
@@ -139,6 +140,7 @@ func LockAndAddFileNode(path string, filename string, size int64, isFile bool) (
 	if !isExist {
 		return nil, nil, fmt.Errorf("path not exist, path : %s", path)
 	}
+
 	id := util.GenerateUUIDString()
 	newNode := &FileNode{
 		Id:             id,
@@ -171,15 +173,15 @@ func initChunks(size int64, id string) []string {
 
 func MoveFileNode(currentPath string, targetPath string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(currentPath, false)
-	defer UnlockAllMutex(stack, false)
 	newParentNode, parentStack, isParentExist := getAndLockByPath(targetPath, false)
-	defer UnlockAllMutex(parentStack, false)
-
 	if !isExist {
 		return nil, fmt.Errorf("current path not exist, path : %s", currentPath)
-	} else if !isParentExist {
+	}
+	defer UnlockAllMutex(stack, false)
+	if !isParentExist {
 		return nil, fmt.Errorf("target path not exist, path : %s", targetPath)
 	}
+	defer UnlockAllMutex(parentStack, false)
 	if newParentNode.childNodes[fileNode.FileName] != nil {
 		return nil, fmt.Errorf("target path already has file with the same name, filename : %s", fileNode.FileName)
 	}
@@ -193,12 +195,10 @@ func MoveFileNode(currentPath string, targetPath string) (*FileNode, error) {
 func RemoveFileNode(path string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
 	if !isExist {
-		// 假如目录树只有 /a/b  删除路径为 /a/b/c.txt
-		// 则stack中只会对 ""  "a" "b"加读锁
-		defer UnlockAllMutex(stack, true)
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
 	defer UnlockAllMutex(stack, false)
+
 	fileNode.FileName = deleteFilePrefix + fileNode.FileName
 	fileNode.IsDel = true
 	delTime := time.Now()
@@ -208,10 +208,10 @@ func RemoveFileNode(path string) (*FileNode, error) {
 
 func ListFileNode(path string) ([]*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, true)
-	defer UnlockAllMutex(stack, true)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
+	defer UnlockAllMutex(stack, true)
 
 	fileNodes := make([]*FileNode, len(fileNode.childNodes))
 	nodeIndex := 0
@@ -224,13 +224,11 @@ func ListFileNode(path string) ([]*FileNode, error) {
 
 func RenameFileNode(path string, newName string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
-
 	if !isExist {
-		defer UnlockAllMutex(stack, true)
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-
 	defer UnlockAllMutex(stack, false)
+
 	delete(fileNode.parentNode.childNodes, fileNode.FileName)
 	fileNode.FileName = newName
 	fileNode.parentNode.childNodes[fileNode.FileName] = fileNode
