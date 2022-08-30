@@ -75,7 +75,7 @@ func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 		nextNode, exist := currentNode.childNodes[name]
 		if !exist {
 			UnlockAllMutex(stack, true)
-			return nil, nil, false
+			return nil, stack, false
 		}
 		currentNode = nextNode
 	}
