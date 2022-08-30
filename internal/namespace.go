@@ -64,12 +64,12 @@ func CheckAndGetFileNode(path string) (*FileNode, error) {
 
 func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 	currentNode := root
-	path = strings.TrimRight(path, pathSplitString)
+	path = strings.Trim(path, pathSplitString)
 	fileNames := strings.Split(path, pathSplitString)
 	stack := list.New()
 
 	// fileNames的第一个是根目录，不存在子node包含根目录的节点，所以[1:]
-	for _, name := range fileNames[1:] {
+	for _, name := range fileNames {
 		currentNode.updateNodeLock.RLock()
 		currentNode.LastLockTime = time.Now()
 		stack.PushBack(currentNode)
