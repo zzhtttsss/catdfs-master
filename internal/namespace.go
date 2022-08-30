@@ -224,11 +224,13 @@ func ListFileNode(path string) ([]*FileNode, error) {
 
 func RenameFileNode(path string, newName string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
-	defer UnlockAllMutex(stack, false)
+
 	if !isExist {
+		defer UnlockAllMutex(stack, true)
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
 
+	defer UnlockAllMutex(stack, false)
 	delete(fileNode.parentNode.childNodes, fileNode.FileName)
 	fileNode.FileName = newName
 	fileNode.parentNode.childNodes[fileNode.FileName] = fileNode

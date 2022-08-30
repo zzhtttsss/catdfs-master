@@ -17,6 +17,7 @@ type NodeTestCase struct {
 	expectFileName      string
 }
 
+// initRoot 根据path构造目录树
 func initRoot(path string) {
 	pp := strings.Split(path, pathSplitString)
 	//TODO 最后一个是否为文件
@@ -35,6 +36,7 @@ func initRoot(path string) {
 			updateNodeLock: &sync.RWMutex{},
 		}
 		curNode.childNodes[nextNode.FileName] = nextNode
+		nextNode.parentNode = curNode
 		nextNode = curNode
 	}
 	root.childNodes[nextNode.FileName] = nextNode
@@ -239,6 +241,45 @@ func TestListFileNode(t *testing.T) {
 				for i, s := range nodes {
 					assert.Equal(t, c.expectFileNames[i], s.FileName)
 				}
+			}
+		})
+	}
+}
+
+func TestRenameFileNode(t *testing.T) {
+	test := map[string]*struct {
+		initRoot       func(path string)
+		directory      string
+		path           string
+		newName        string
+		expectFileName string
+	}{
+		"FileNotExist": {
+			initRoot: nil,
+			path:     "/a/b/",
+		},
+		"FileExist": {
+			initRoot:       initRoot,
+			directory:      "/a/b/c.txt",
+			path:           "/a/b/c.txt",
+			newName:        "newName.txt",
+			expectFileName: "newName.txt",
+		},
+	}
+	for name, c := range test {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				root.childNodes = map[string]*FileNode{}
+			}()
+			if c.initRoot != nil {
+				c.initRoot(c.directory)
+			}
+			node, err := RenameFileNode(c.path, c.newName)
+			if c.initRoot == nil {
+				assert.Nil(t, node)
+				assert.Error(t, err)
+			} else {
+				assert.Equal(t, c.expectFileName, node.FileName)
 			}
 		})
 	}
