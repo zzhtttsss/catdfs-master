@@ -44,12 +44,12 @@ func initRoot(path string) {
 
 func TestGetAndLockByPath(t *testing.T) {
 	test := map[string]*NodeTestCase{
-		"PathNotExit": {
+		"PathNotExist": {
 			initRootFunc:        nil,
 			path:                "/usr/local/abc.txt",
 			isRead:              true,
 			expectIsFileExist:   false,
-			expectStackLength:   1,
+			expectStackLength:   0,
 			expectCanReadLockOn: true,
 		},
 		"Read": {
@@ -97,10 +97,12 @@ func TestGetAndLockByPath(t *testing.T) {
 			assert.Equal(t, c.expectIsFileExist, exist)
 			assert.Equal(t, c.expectStackLength, s.Len())
 			// 判断最后一个是读锁还是写锁
-			node, ok := s.Back().Value.(*FileNode)
-			assert.True(t, ok)
-			assert.Equal(t, c.expectCanReadLockOn, node.updateNodeLock.TryRLock())
-			UnlockAllMutex(s, c.isRead)
+			if s.Len() != 0 {
+				node, ok := s.Back().Value.(*FileNode)
+				assert.True(t, ok)
+				assert.Equal(t, c.expectCanReadLockOn, node.updateNodeLock.TryRLock())
+				UnlockAllMutex(s, c.isRead)
+			}
 		})
 	}
 }
