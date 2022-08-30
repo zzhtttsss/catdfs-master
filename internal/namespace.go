@@ -199,7 +199,7 @@ func RemoveFileNode(path string) (*FileNode, error) {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
 	defer UnlockAllMutex(stack, false)
-	fileNode.FileName = deleteFilePrefix + util.GenerateUUIDString()
+	fileNode.FileName = deleteFilePrefix + fileNode.FileName
 	fileNode.IsDel = true
 	delTime := time.Now()
 	fileNode.DelTime = &(delTime)
