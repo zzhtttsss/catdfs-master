@@ -16,7 +16,6 @@ import (
 
 const (
 	IsFile4File = true
-	replicaNum  = 3
 )
 
 func DoRegister(ctx context.Context) (string, string, error) {
@@ -89,11 +88,11 @@ func DoCheckArgs4Add(args *pb.CheckArgs4AddArgs) (string, int32, error) {
 
 func DoGetDataNodes4Add(fileNodeId string, chunkIndex int32) ([]string, string, error) {
 	var (
-		dataNodeIds   = make([]string, replicaNum)
-		dataNodeAddrs = make([]string, replicaNum)
+		dataNodeIds   = make([]string, viper.GetInt(common.ReplicaNum))
+		dataNodeAddrs = make([]string, viper.GetInt(common.ReplicaNum))
 	)
 	chunkId := fileNodeId + strconv.Itoa(int(chunkIndex))
-	dataNodes, primaryNode := AllocateDataNodes(chunkId, replicaNum)
+	dataNodes, primaryNode := AllocateDataNodes()
 
 	for i, node := range dataNodes {
 		node.Chunks.Add(chunkId)

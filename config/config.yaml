@@ -7,3 +7,4 @@ master:
 chunk:
   waitTime: 10    # chunk server等待时间
   dieTime: 60     # chunk server死亡时间
+  replicaNum: 3   # number of replica that a chunk will be store
