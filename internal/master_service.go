@@ -3,7 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
-	mapset "github.com/deckarep/golang-set"
+	set "github.com/deckarep/golang-set"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -35,8 +35,8 @@ func DoRegister(ctx context.Context) (string, string, error) {
 		Id:        id,
 		status:    common.Alive,
 		Address:   address,
-		Chunks:    mapset.NewSet(),
-		Leases:    mapset.NewSet(),
+		Chunks:    set.NewSet(),
+		Leases:    set.NewSet(),
 		waitTimer: waitTimer,
 		dieTimer:  dieTimer,
 	}
