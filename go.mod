@@ -3,6 +3,7 @@ module tinydfs-master
 go 1.18
 
 require (
+	github.com/deckarep/golang-set v1.8.0
 	github.com/google/uuid v1.3.0
 	github.com/sirupsen/logrus v1.9.0
 	github.com/spf13/viper v1.12.0
@@ -36,6 +37,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.0 // indirect
 )
 
-replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20220829094156-c32e674d0f7f
+//replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20220829094156-c32e674d0f7f
 
-//replace tinydfs-base => ../tinydfs-base
+replace tinydfs-base => ../tinydfs-base

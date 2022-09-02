@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	set "github.com/deckarep/golang-set"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -14,8 +15,7 @@ import (
 )
 
 const (
-	IsFile4File  = true
-	replicateNum = 3
+	IsFile4File = true
 )
 
 func DoRegister(ctx context.Context) (string, string, error) {
@@ -35,7 +35,8 @@ func DoRegister(ctx context.Context) (string, string, error) {
 		Id:        id,
 		status:    common.Alive,
 		Address:   address,
-		Chunks:    []string{},
+		Chunks:    set.NewSet(),
+		Leases:    set.NewSet(),
 		waitTimer: waitTimer,
 		dieTimer:  dieTimer,
 	}
@@ -86,13 +87,25 @@ func DoCheckArgs4Add(args *pb.CheckArgs4AddArgs) (string, int32, error) {
 }
 
 func DoGetDataNodes4Add(fileNodeId string, chunkIndex int32) ([]string, string, error) {
+	var (
+		dataNodeIds   = make([]string, viper.GetInt(common.ReplicaNum))
+		dataNodeAddrs = make([]string, viper.GetInt(common.ReplicaNum))
+	)
 	chunkId := fileNodeId + strconv.Itoa(int(chunkIndex))
-	dataNodes, primaryNode := AllocateDataNodes(chunkId, replicateNum)
+	dataNodes, primaryNode := AllocateDataNodes()
+
+	for i, node := range dataNodes {
+		node.Chunks.Add(chunkId)
+		dataNodeIds[i] = node.Id
+		dataNodeAddrs[i] = node.Address
+	}
+	primaryNode.Leases.Add(chunkId)
+
 	chunk := &Chunk{
 		Id:          chunkId,
-		dataNodes:   dataNodes,
-		primaryNode: primaryNode,
+		dataNodes:   dataNodeIds,
+		primaryNode: primaryNode.Id,
 	}
 	AddChunk(chunk)
-	return dataNodes, primaryNode, nil
+	return dataNodeAddrs, primaryNode.Address, nil
 }

@@ -19,7 +19,7 @@ var GlobalMasterHandler *MasterHandler
 type MasterHandler struct {
 	pb.UnimplementedRegisterServiceServer
 	pb.UnimplementedHeartbeatServiceServer
-	pb.UnimplementedMasterAddServer
+	pb.UnimplementedMasterAddServiceServer
 }
 
 //CreateMasterHandler 创建MasterHandler
@@ -113,7 +113,7 @@ func (handler *MasterHandler) Server() {
 	server := grpc.NewServer()
 	pb.RegisterRegisterServiceServer(server, handler)
 	pb.RegisterHeartbeatServiceServer(server, handler)
-	pb.RegisterMasterAddServer(server, handler)
+	pb.RegisterMasterAddServiceServer(server, handler)
 	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
 	server.Serve(listener)
 }
