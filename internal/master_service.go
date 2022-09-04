@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	IsFile4File = true
+	isFile4File = true
 )
 
 func DoRegister(ctx context.Context) (string, error) {
@@ -76,7 +76,7 @@ func DoHeartbeat(Id string) error {
 }
 
 func DoCheckArgs4Add(args *pb.CheckArgs4AddArgs) (string, int32, error) {
-	fileNode, stack, err := LockAndAddFileNode(args.Path, args.FileName, args.Size, IsFile4File)
+	fileNode, stack, err := LockAndAddFileNode(args.Path, args.FileName, args.Size, isFile4File)
 	fileNodesMapLock.Lock()
 	unlockedFileNodes[fileNode.Id] = stack
 	fileNodesMapLock.Unlock()
@@ -91,7 +91,7 @@ func DoGetDataNodes4Add(fileNodeId string, chunkIndex int32) ([]string, string, 
 		dataNodeIds   = make([]string, viper.GetInt(common.ReplicaNum))
 		dataNodeAddrs = make([]string, viper.GetInt(common.ReplicaNum))
 	)
-	chunkId := fileNodeId + strconv.Itoa(int(chunkIndex))
+	chunkId := fileNodeId + common.ChunkIdDelimiter + strconv.Itoa(int(chunkIndex))
 	dataNodes, primaryNode := AllocateDataNodes()
 
 	for i, node := range dataNodes {
