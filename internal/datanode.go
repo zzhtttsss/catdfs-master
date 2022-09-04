@@ -88,7 +88,7 @@ func AllocateDataNodes() ([]*DataNode, *DataNode) {
 	return dataNodes, primaryNode
 }
 
-func RemoveChunk(chunkId, node *DataNode) {
+func RemoveChunk(chunkId string, node *DataNode) {
 	node.Chunks.Remove(chunkId)
 	adjust4Remove(node)
 }

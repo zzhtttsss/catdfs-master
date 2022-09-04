@@ -18,7 +18,7 @@ const (
 	IsFile4File = true
 )
 
-func DoRegister(ctx context.Context) (string, string, error) {
+func DoRegister(ctx context.Context) (string, error) {
 	var (
 		id      string
 		address string
@@ -59,7 +59,7 @@ func DoRegister(ctx context.Context) (string, string, error) {
 	}(ctx)
 
 	logrus.WithContext(ctx).Infof("[Id=%s] Connected", id)
-	return id, address, nil
+	return id, nil
 }
 
 func DoHeartbeat(Id string) error {
