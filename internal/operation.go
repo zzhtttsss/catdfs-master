@@ -8,5 +8,7 @@ const (
 )
 
 type Operation struct {
-	Type string
+	Type string // Specify the Operation Type
+	Src  string // Client `src` Parameter
+	Des  string // Client `des` Parameter
 }
