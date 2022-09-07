@@ -46,7 +46,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 
 // Register 由Chunkserver调用该方法，将对应DataNode注册到本NameNode上
 func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterArgs) (*pb.DNRegisterReply, error) {
-	id, address, err := DoRegister(ctx)
+	id, _, err := DoRegister(ctx)
 	if err != nil {
 		logrus.Errorf("Fail to register, error code: %v, error detail: %s,", common.MasterRegisterFailed, err.Error())
 		details, _ := status.New(codes.NotFound, "").WithDetails(&pb.RPCError{
@@ -56,8 +56,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		return nil, details.Err()
 	}
 	rep := &pb.DNRegisterReply{
-		Id:   id,
-		Addr: address,
+		Id: id,
 	}
 	return rep, nil
 }

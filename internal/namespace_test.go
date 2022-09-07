@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"tinydfs-base/util"
 )
 
 type NodeTestCase struct {
@@ -23,6 +24,7 @@ func initRoot(path string) {
 	//TODO 最后一个是否为文件
 	n := len(pp)
 	nextNode := &FileNode{
+		Id:             util.GenerateUUIDString(),
 		FileName:       pp[n-1],
 		childNodes:     map[string]*FileNode{},
 		IsFile:         true,
@@ -30,6 +32,7 @@ func initRoot(path string) {
 	}
 	for i := n - 2; i >= 1; i-- {
 		curNode := &FileNode{
+			Id:             util.GenerateUUIDString(),
 			FileName:       pp[i],
 			childNodes:     map[string]*FileNode{},
 			IsFile:         false,
@@ -40,6 +43,7 @@ func initRoot(path string) {
 		nextNode = curNode
 	}
 	root.childNodes[nextNode.FileName] = nextNode
+	nextNode.parentNode = root
 }
 
 func TestGetAndLockByPath(t *testing.T) {

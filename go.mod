@@ -9,7 +9,7 @@ require (
 	github.com/spf13/viper v1.12.0
 	github.com/stretchr/testify v1.7.1
 	google.golang.org/grpc v1.48.0
-	tinydfs-base v0.0.0-00010101000000-000000000000
+	tinydfs-base v0.0.0-20220905030552-e53c8ca70ca1
 )
 
 require (
@@ -37,6 +37,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.0 // indirect
 )
 
-//replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20220829094156-c32e674d0f7f
+//replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20220905030552-e53c8ca70ca1
 
 replace tinydfs-base => ../tinydfs-base

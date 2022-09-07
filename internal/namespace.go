@@ -3,7 +3,9 @@ package internal
 import (
 	"container/list"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +21,8 @@ const (
 	rootFileName     = ""
 	pathSplitString  = "/"
 	deleteFilePrefix = "delete"
+	RootFileName     = ".\\fsimage.txt"
+	TimeFormat       = "2006-01-02_15:04:05"
 )
 
 var (
@@ -32,6 +36,7 @@ var (
 	// Store all locked nodes.
 	// All nodes locked by an operation will be placed on a stack as the value of the map.
 	// The id of the FileNode being operated is used as the key.
+	//TODO 删除操作
 	unlockedFileNodes = make(map[string]*list.List)
 	fileNodesMapLock  = &sync.Mutex{}
 )
@@ -51,6 +56,21 @@ type FileNode struct {
 	IsDel          bool
 	updateNodeLock *sync.RWMutex
 	LastLockTime   time.Time
+}
+
+func (f *FileNode) String() string {
+	res := strings.Builder{}
+	if f.parentNode == nil {
+		res.WriteString(fmt.Sprintf("%s %s %s %d %s %d %v %v %v %s\n",
+			f.Id, f.FileName, "-1", len(f.childNodes), f.Chunks,
+			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(TimeFormat)))
+	} else {
+		res.WriteString(fmt.Sprintf("%s %s %s %d %s %d %v %v %v %s\n",
+			f.Id, f.FileName, f.parentNode.Id, len(f.childNodes), f.Chunks,
+			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(TimeFormat)))
+	}
+
+	return res.String()
 }
 
 func CheckAndGetFileNode(path string) (*FileNode, error) {
@@ -237,4 +257,40 @@ func RenameFileNode(path string, newName string) (*FileNode, error) {
 		fileNode.DelTime = nil
 	}
 	return fileNode, nil
+}
+
+func RootSerialize() {
+	// Only serialize when no filenodes are locked
+	if len(unlockedFileNodes) != 0 {
+		return
+	}
+	if root == nil {
+		return
+	}
+	// Prevent other operations to change the directory
+	root.updateNodeLock.Lock()
+	defer root.updateNodeLock.Unlock()
+	// Write root level-order in the fsimage
+	file, err := os.OpenFile(RootFileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0755)
+	if err != nil {
+		logrus.Warnf("Open %s failed.Error Detail %s\n", RootFileName, err)
+		return
+	}
+	queue := list.New()
+	queue.PushBack(root)
+	for queue.Len() != 0 {
+		cur := queue.Back()
+		queue.Remove(cur)
+		node, ok := cur.Value.(*FileNode)
+		if !ok {
+			logrus.Warnf("Element2FileNode failed\n")
+		}
+		_, err = file.WriteString(node.String())
+		if err != nil {
+			logrus.Warnf("Write String failed.Error Detail %s\n", err)
+		}
+		for _, child := range node.childNodes {
+			queue.PushBack(child)
+		}
+	}
 }
