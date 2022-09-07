@@ -26,24 +26,24 @@ func initRoot(path string) {
 	nextNode := &FileNode{
 		Id:             util.GenerateUUIDString(),
 		FileName:       pp[n-1],
-		childNodes:     map[string]*FileNode{},
+		ChildNodes:     map[string]*FileNode{},
 		IsFile:         true,
-		updateNodeLock: &sync.RWMutex{},
+		UpdateNodeLock: &sync.RWMutex{},
 	}
 	for i := n - 2; i >= 1; i-- {
 		curNode := &FileNode{
 			Id:             util.GenerateUUIDString(),
 			FileName:       pp[i],
-			childNodes:     map[string]*FileNode{},
+			ChildNodes:     map[string]*FileNode{},
 			IsFile:         false,
-			updateNodeLock: &sync.RWMutex{},
+			UpdateNodeLock: &sync.RWMutex{},
 		}
-		curNode.childNodes[nextNode.FileName] = nextNode
-		nextNode.parentNode = curNode
+		curNode.ChildNodes[nextNode.FileName] = nextNode
+		nextNode.ParentNode = curNode
 		nextNode = curNode
 	}
-	root.childNodes[nextNode.FileName] = nextNode
-	nextNode.parentNode = root
+	root.ChildNodes[nextNode.FileName] = nextNode
+	nextNode.ParentNode = root
 }
 
 func TestGetAndLockByPath(t *testing.T) {
@@ -92,7 +92,7 @@ func TestGetAndLockByPath(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.childNodes = map[string]*FileNode{}
+				root.ChildNodes = map[string]*FileNode{}
 			}()
 			if c.initRootFunc != nil {
 				c.initRootFunc(c.path)
@@ -104,7 +104,7 @@ func TestGetAndLockByPath(t *testing.T) {
 			if s.Len() != 0 {
 				node, ok := s.Back().Value.(*FileNode)
 				assert.True(t, ok)
-				assert.Equal(t, c.expectCanReadLockOn, node.updateNodeLock.TryRLock())
+				assert.Equal(t, c.expectCanReadLockOn, node.UpdateNodeLock.TryRLock())
 				UnlockAllMutex(s, c.isRead)
 			}
 		})
@@ -127,7 +127,7 @@ func TestCheckAndGetFileNode(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.childNodes = map[string]*FileNode{}
+				root.ChildNodes = map[string]*FileNode{}
 			}()
 			if c.initRootFunc != nil {
 				c.initRootFunc(c.path)
@@ -197,7 +197,7 @@ func TestRemoveFileNode(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.childNodes = map[string]*FileNode{}
+				root.ChildNodes = map[string]*FileNode{}
 			}()
 			if c.initRoot != nil {
 				c.initRoot(c.path)
@@ -234,7 +234,7 @@ func TestListFileNode(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.childNodes = map[string]*FileNode{}
+				root.ChildNodes = map[string]*FileNode{}
 			}()
 			if c.initRoot != nil {
 				c.initRoot(c.directory)
@@ -275,7 +275,7 @@ func TestRenameFileNode(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.childNodes = map[string]*FileNode{}
+				root.ChildNodes = map[string]*FileNode{}
 			}()
 			if c.initRoot != nil {
 				c.initRoot(c.directory)

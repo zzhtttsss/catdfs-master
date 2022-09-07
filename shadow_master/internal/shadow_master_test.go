@@ -4,23 +4,24 @@ import (
 	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
+	"tinydfs-master/internal"
 )
 
 func TestLogger_Info(t *testing.T) {
 	test := map[string]*struct {
-		op *Operation
+		op *internal.Operation
 	}{
 		"Add": {
-			op: OperationAdd("/a/b.txt", true),
+			op: internal.OperationAdd("/a/b.txt", true),
 		},
 		"Remove": {
-			op: OperationRemove("/a/b.txt"),
+			op: internal.OperationRemove("/a/b.txt"),
 		},
 		"Rename": {
-			op: OperationRename("/a/b.txt", "d.txt"),
+			op: internal.OperationRename("/a/b.txt", "d.txt"),
 		},
 		"Move": {
-			op: OperationMove("/a/b.txt", "/c/d.txt"),
+			op: internal.OperationMove("/a/b.txt", "/c/d.txt"),
 		},
 	}
 	for _, c := range test {
@@ -40,15 +41,14 @@ func TestReadLogLines(t *testing.T) {
 }
 
 func TestRootSerialize(t *testing.T) {
-	_ = os.Remove(RootFileName)
-	initRoot("/a/b/c.txt")
-	RootSerialize()
+	_ = os.Remove(internal.RootFileName)
+	internal.RootSerialize()
 }
 
 func TestReadRootLines(t *testing.T) {
-	_ = os.Remove(RootFileName)
-	initRoot("/a/b/c.txt")
-	RootSerialize()
+	_ = os.Remove(internal.RootFileName)
+	//internal.initRoot("/a/b/c.txt")
+	internal.RootSerialize()
 	res := SM.readRootLines()
 	assert.Equal(t, 4, len(res))
 	for id, n := range res {
@@ -57,13 +57,13 @@ func TestReadRootLines(t *testing.T) {
 }
 
 func TestRootUnSerialize(t *testing.T) {
-	_ = os.Remove(RootFileName)
-	initRoot("/a/b/c.txt")
-	RootSerialize()
+	_ = os.Remove(internal.RootFileName)
+	//internal.initRoot("/a/b/c.txt")
+	internal.RootSerialize()
 	SM.RootUnSerialize(SM.readRootLines())
 	assert.NotNil(t, SM.shadowRoot)
-	assert.Equal(t, 1, len(SM.shadowRoot.childNodes))
-	child1, ok := SM.shadowRoot.childNodes["a"]
+	assert.Equal(t, 1, len(SM.shadowRoot.ChildNodes))
+	child1, ok := SM.shadowRoot.ChildNodes["a"]
 	assert.True(t, ok)
-	assert.Equal(t, 1, len(child1.childNodes))
+	assert.Equal(t, 1, len(child1.ChildNodes))
 }
