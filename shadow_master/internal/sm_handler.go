@@ -52,21 +52,35 @@ func (sm *ShadowMasterHandler) FsimageFlush() {
 	for {
 		select {
 		case <-sm.SM.flushTimer.C:
+			//TODO
+			// Logger should close the edits.txt handle and rename edits.txt to log.
+			// At this time, all the operations should be blocked until a new edits.txt is created.
+			err := sm.SM.writer.Close()
+			if err != nil {
+				logrus.Warnf("Close edits.txt failed.Error detail %s\n", err)
+			}
+
 			// First rename the edits.log and create a new edits.log
 			pwd, _ := os.Getwd()
 			newPath := fmt.Sprintf("%s\\%s.log", pwd, time.Now().Format(internal.TimeFormat))
-			err := os.Rename(fmt.Sprintf("%s%s", pwd, LogFileName[1:]), newPath)
+			err = os.Rename(fmt.Sprintf("%s%s", pwd, LogFileName[1:]), newPath)
 			if err != nil {
-				logrus.Warnf("Rename edits.log failed.Error detail %s\n", err)
+				logrus.Warnf("Rename edits.txt failed.Error detail %s\n", err)
 				//TODO continue的合理性
 				sm.SM.flushTimer.Reset(time.Duration(viper.GetInt(common.SMFsimageFlushTime)) * time.Second)
 				continue
 			}
+			newLogWriter, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_APPEND, 0755)
+			if err != nil {
+				logrus.Warnf("Create edits.txt failed.Error detail %s\n", err)
+			}
+			sm.SM.log.SetOutput(newLogWriter)
+			sm.SM.writer = newLogWriter
 			// Second read edits.log and merge the operations onto the sm.directory
-			ops := sm.SM.readLogLines(newPath)
+			ops := internal.ReadLogLines(newPath)
 			internal.Merge2Root(sm.SM.shadowRoot, ops)
 			// Third serialize the sm.directory and store it in the fsimage.txt
-			sm.SM.RootSerialize()
+			internal.RootSerialize(sm.SM.shadowRoot)
 			sm.SM.flushTimer.Reset(time.Duration(viper.GetInt(common.SMFsimageFlushTime)) * time.Second)
 		}
 	}

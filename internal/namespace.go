@@ -20,7 +20,7 @@ const (
 	pathSplitString  = "/"
 	deleteFilePrefix = "delete"
 	RootFileName     = ".\\fsimage.txt"
-	TimeFormat       = "2006-01-02_15:04:05"
+	TimeFormat       = "2006-01-02-15.04.05"
 )
 
 var (

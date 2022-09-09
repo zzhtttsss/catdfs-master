@@ -25,6 +25,8 @@ type MasterHandler struct {
 //CreateMasterHandler 创建MasterHandler
 func CreateMasterHandler() {
 	config.InitConfig()
+	RootDeserialize(root, ReadRootLines())
+	Merge2Root(root, ReadLogLines(LogFileName))
 	GlobalMasterHandler = &MasterHandler{}
 }
 
