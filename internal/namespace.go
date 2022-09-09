@@ -3,9 +3,7 @@ package internal
 import (
 	"container/list"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -257,40 +255,4 @@ func RenameFileNode(path string, newName string) (*FileNode, error) {
 		fileNode.DelTime = nil
 	}
 	return fileNode, nil
-}
-
-func RootSerialize() {
-	// Only serialize when no filenodes are locked
-	if len(unlockedFileNodes) != 0 {
-		return
-	}
-	if root == nil {
-		return
-	}
-	// Prevent other operations to change the directory
-	root.UpdateNodeLock.Lock()
-	defer root.UpdateNodeLock.Unlock()
-	// Write root level-order in the fsimage
-	file, err := os.OpenFile(RootFileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0755)
-	if err != nil {
-		logrus.Warnf("Open %s failed.Error Detail %s\n", RootFileName, err)
-		return
-	}
-	queue := list.New()
-	queue.PushBack(root)
-	for queue.Len() != 0 {
-		cur := queue.Back()
-		queue.Remove(cur)
-		node, ok := cur.Value.(*FileNode)
-		if !ok {
-			logrus.Warnf("Element2FileNode failed\n")
-		}
-		_, err = file.WriteString(node.String())
-		if err != nil {
-			logrus.Warnf("Write String failed.Error Detail %s\n", err)
-		}
-		for _, child := range node.ChildNodes {
-			queue.PushBack(child)
-		}
-	}
 }

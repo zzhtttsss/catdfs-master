@@ -3,6 +3,12 @@ master:
   addr: "127.0.0.1"
   port: ":9099"
 
+# shadow master 配置
+shadowMaster:
+  addr: "127.0.0.1"
+  port: ":9100"
+  fsimageFlushTime: 1
+
 # chunk server 配置
 chunk:
   waitTime: 10    # chunk server等待时间

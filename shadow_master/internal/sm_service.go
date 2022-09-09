@@ -1,9 +1,11 @@
 package internal
 
-import "tinydfs-master/internal"
+import (
+	"tinydfs-base/protocol/pb"
+)
 
-func DoSendOperation(op *internal.Operation) error {
-	err := GlobalSMHandler.Info(op)
+func DoSendOperation(op *pb.OperationArgs) error {
+	err := GlobalSMHandler.SM.Info(op)
 	if err != nil {
 		return err
 	}

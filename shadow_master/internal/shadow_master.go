@@ -2,8 +2,8 @@ package internal
 
 import (
 	"bufio"
+	"container/list"
 	"encoding/json"
-	"fmt"
 	"github.com/sirupsen/logrus"
 	"log"
 	"os"
@@ -11,13 +11,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"tinydfs-base/protocol/pb"
 	"tinydfs-base/util"
 	"tinydfs-master/internal"
 )
 
 const (
-	LogFileName = ".\\edits.txt"
-	idIdx       = iota - 1
+	idIdx = iota
 	fileNameIdx
 	parentIdIdx
 	childrenLengthIdx
@@ -29,18 +29,28 @@ const (
 	lastLockTimeIdx
 )
 
+const (
+	LogFileName       = ".\\edits.txt"
+	DirectoryFileName = ".\\fsimage.txt"
+)
+
 type ShadowMaster struct {
 	log        *logrus.Logger // FileWriter
 	m          *sync.Mutex
-	shadowRoot *internal.FileNode // The lazy copy of root in namespace
+	shadowRoot *internal.FileNode // The lazy copy of the directory in namespace
+	flushTimer *time.Timer
 }
 
-var SM *ShadowMaster
-
-func init() {
-	SM = &ShadowMaster{
+func CreateShadowMaster() *ShadowMaster {
+	SM := &ShadowMaster{
 		log: logrus.New(),
 		m:   &sync.Mutex{},
+		shadowRoot: &internal.FileNode{
+			Id:             util.GenerateUUIDString(),
+			FileName:       "",
+			ChildNodes:     make(map[string]*internal.FileNode),
+			UpdateNodeLock: &sync.RWMutex{},
+		},
 	}
 	SM.log.SetFormatter(&logrus.TextFormatter{
 		TimestampFormat: "2006-01-02 15:04:05",
@@ -50,6 +60,7 @@ func init() {
 		log.Panicf("Create file %s failed: %v\n", LogFileName, err)
 	}
 	SM.log.SetOutput(writer)
+	return SM
 }
 
 func (l *ShadowMaster) Info(a any) error {
@@ -63,16 +74,18 @@ func (l *ShadowMaster) Info(a any) error {
 	return nil
 }
 
-//TODO 感觉通过设计模式包装。读edit和读fsimage可以复用
-func (l *ShadowMaster) readLogLines() []*internal.Operation {
-	f, err := os.Open(LogFileName)
+// TODO 感觉通过设计模式包装。读edit和读fsimage可以复用
+// readLogLines read the `path` log and find all of the finished operations
+func (l *ShadowMaster) readLogLines(path string) []*pb.OperationArgs {
+	f, err := os.Open(path)
 	if err != nil {
-		log.Panicf("Open edits file failed: %v\n", err)
+		log.Panicf("Open edits file failed.Error detail %v\n", err)
 		//TODO 需要额外处理
 		return nil
 	}
 	buf := bufio.NewScanner(f)
-	res := make([]*internal.Operation, 0)
+	res := make([]*pb.OperationArgs, 0)
+	opMap := make(map[string]*pb.OperationArgs)
 	for buf.Scan() {
 		line := buf.Text()
 		line = strings.TrimSpace(line)
@@ -82,10 +95,15 @@ func (l *ShadowMaster) readLogLines() []*internal.Operation {
 		line = strings.ReplaceAll(line, "\\", "")
 		left := strings.Index(line, "{")
 		right := strings.Index(line, "}")
-		op := &internal.Operation{}
-		fmt.Println(line)
+		op := &pb.OperationArgs{}
 		util.Unmarshal(line[left:right+1], op)
-		res = append(res, op)
+		// Map is used to filter which operation is finished
+		_, ok := opMap[op.Uuid]
+		if !ok {
+			opMap[op.Uuid] = op
+		} else {
+			res = append(res, op)
+		}
 	}
 	return res
 }
@@ -142,7 +160,38 @@ func (l *ShadowMaster) readRootLines() map[string]*internal.FileNode {
 	return res
 }
 
-func (l *ShadowMaster) RootUnSerialize(rootMap map[string]*internal.FileNode) {
+//RootSerialize put the shadow directory onto the file storage
+func (l *ShadowMaster) RootSerialize() {
+	if l.shadowRoot == nil {
+		return
+	}
+	// Write root level-order in the fsimage
+	file, err := os.OpenFile(DirectoryFileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0755)
+	if err != nil {
+		logrus.Warnf("Open %s failed.Error Detail %s\n", DirectoryFileName, err)
+		return
+	}
+	queue := list.New()
+	queue.PushBack(l.shadowRoot)
+	for queue.Len() != 0 {
+		cur := queue.Back()
+		queue.Remove(cur)
+		node, ok := cur.Value.(*internal.FileNode)
+		if !ok {
+			logrus.Warnf("Element2FileNode failed\n")
+		}
+		_, err = file.WriteString(node.String())
+		if err != nil {
+			logrus.Warnf("Write String failed.Error Detail %s\n", err)
+		}
+		for _, child := range node.ChildNodes {
+			queue.PushBack(child)
+		}
+	}
+}
+
+// RootDeserialize reads the fsimage.txt and rebuild the directory.
+func (l *ShadowMaster) RootDeserialize(rootMap map[string]*internal.FileNode) {
 	// Look for root
 	for _, r := range rootMap {
 		if r.ParentNode.Id == "-1" {
@@ -161,44 +210,4 @@ func buildTree(parent *internal.FileNode, nodeMap map[string]*internal.FileNode)
 			buildTree(cur, nodeMap)
 		}
 	}
-}
-
-// MergeRootTree merges the operations onto shadow root
-func (l *ShadowMaster) MergeRootTree() {
-	if l.shadowRoot == nil {
-		logrus.Panicf("Should Unserialize fsimage first!")
-		return
-	}
-	ops := l.readLogLines()
-	for _, op := range ops {
-		switch op.Type {
-		case internal.Operation_Add:
-			l.add(op.Des, op.IsFile)
-		case internal.Operation_Remove:
-			l.remove(op.Des)
-		case internal.Operation_Rename:
-			l.rename(op.Src, op.Des)
-		case internal.Operation_Move:
-			l.move(op.Src, op.Des)
-		default:
-			logrus.Panicf("Error Operation Type.")
-		}
-	}
-	_ = os.Remove(LogFileName)
-}
-
-func (l *ShadowMaster) add(des string, file bool) {
-
-}
-
-func (l *ShadowMaster) remove(des string) {
-
-}
-
-func (l *ShadowMaster) rename(src string, des string) {
-
-}
-
-func (l *ShadowMaster) move(src string, des string) {
-
 }

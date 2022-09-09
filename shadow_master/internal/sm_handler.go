@@ -2,8 +2,15 @@ package internal
 
 import (
 	"context"
+	"fmt"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"net"
+	"os"
+	"time"
 	"tinydfs-base/common"
 	"tinydfs-base/config"
 	"tinydfs-base/protocol/pb"
@@ -13,43 +20,24 @@ import (
 var GlobalSMHandler *ShadowMasterHandler
 
 type ShadowMasterHandler struct {
-	ShadowMaster
+	SM *ShadowMaster
 	pb.UnimplementedSendOperationServiceServer
 }
 
 //CreateSMHandler creates CreateSMHandler to handler rpc
 func CreateSMHandler() {
 	config.InitConfig()
-	GlobalSMHandler = &ShadowMasterHandler{}
+	sm := CreateShadowMaster()
+	GlobalSMHandler = &ShadowMasterHandler{
+		SM: sm,
+	}
+	GlobalSMHandler.SM.flushTimer = time.NewTimer(time.Duration(viper.GetInt(common.SMFsimageFlushTime)) * time.Second)
+	go GlobalSMHandler.FsimageFlush()
+
 }
 
 func (sm *ShadowMasterHandler) SendOperation(ctx context.Context, args *pb.OperationArgs) (*pb.OperationReply, error) {
-	op := &internal.Operation{}
-	switch args.Type {
-	case internal.Operation_Add:
-		op.Type = internal.Operation_Add
-		op.Des = args.Des
-		op.IsFile = args.IsFile
-	case internal.Operation_Move:
-		op.Type = internal.Operation_Move
-		op.Src = args.Src
-		op.Des = args.Des
-	case internal.Operation_Remove:
-		op.Type = internal.Operation_Remove
-		op.Des = args.Des
-	case internal.Operation_Rename:
-		op.Type = internal.Operation_Rename
-		op.Src = args.Src
-		op.Des = args.Des
-	default:
-		errMsg := "Invalid Operation Type"
-		details, _ := status.New(codes.InvalidArgument, errMsg).WithDetails(&pb.RPCError{
-			Code: common.ShadowMasterSendOperationFailed,
-			Msg:  errMsg,
-		})
-		return &pb.OperationReply{Ok: false}, details.Err()
-	}
-	err := DoSendOperation(op)
+	err := DoSendOperation(args)
 	if err != nil {
 		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.ShadowMasterSendOperationFailed,
@@ -58,4 +46,40 @@ func (sm *ShadowMasterHandler) SendOperation(ctx context.Context, args *pb.Opera
 		return &pb.OperationReply{Ok: false}, details.Err()
 	}
 	return &pb.OperationReply{Ok: true}, nil
+}
+
+func (sm *ShadowMasterHandler) FsimageFlush() {
+	for {
+		select {
+		case <-sm.SM.flushTimer.C:
+			// First rename the edits.log and create a new edits.log
+			pwd, _ := os.Getwd()
+			newPath := fmt.Sprintf("%s\\%s.log", pwd, time.Now().Format(internal.TimeFormat))
+			err := os.Rename(fmt.Sprintf("%s%s", pwd, LogFileName[1:]), newPath)
+			if err != nil {
+				logrus.Warnf("Rename edits.log failed.Error detail %s\n", err)
+				//TODO continue的合理性
+				sm.SM.flushTimer.Reset(time.Duration(viper.GetInt(common.SMFsimageFlushTime)) * time.Second)
+				continue
+			}
+			// Second read edits.log and merge the operations onto the sm.directory
+			ops := sm.SM.readLogLines(newPath)
+			internal.Merge2Root(sm.SM.shadowRoot, ops)
+			// Third serialize the sm.directory and store it in the fsimage.txt
+			sm.SM.RootSerialize()
+			sm.SM.flushTimer.Reset(time.Duration(viper.GetInt(common.SMFsimageFlushTime)) * time.Second)
+		}
+	}
+}
+
+func (sm *ShadowMasterHandler) Server() {
+	listener, err := net.Listen(common.TCP, viper.GetString(common.SMPort))
+	if err != nil {
+		logrus.Errorf("Fail to server, error code: %v, error detail: %s,", common.MasterRPCServerFailed, err.Error())
+		os.Exit(1)
+	}
+	server := grpc.NewServer()
+	pb.RegisterSendOperationServiceServer(server, sm)
+	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
+	server.Serve(listener)
 }

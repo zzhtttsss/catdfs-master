@@ -1,12 +1,13 @@
 package main
 
 import (
-	"fmt"
-	"github.com/spf13/viper"
-	"tinydfs-base/config"
+	"tinydfs-master/shadow_master/internal"
 )
 
+func init() {
+	internal.CreateSMHandler()
+}
+
 func main() {
-	config.InitConfig()
-	fmt.Println(viper.GetString("shadowMaster.addr"))
+	internal.GlobalSMHandler.Server()
 }

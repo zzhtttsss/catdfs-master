@@ -4,15 +4,32 @@ import (
 	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
+	"tinydfs-base/protocol/pb"
 	"tinydfs-master/internal"
 )
 
+var SM *ShadowMaster
+
+func TestMain(m *testing.M) {
+	SM = CreateShadowMaster()
+	m.Run()
+	SM = nil
+}
+
+func SetupAndTeardownTestCase() func(t *testing.T) {
+	_ = os.Remove(LogFileName)
+	_ = os.Remove(DirectoryFileName)
+	return func(t *testing.T) {}
+}
+
 func TestLogger_Info(t *testing.T) {
+	teardown := SetupAndTeardownTestCase()
+	defer teardown(t)
 	test := map[string]*struct {
-		op *internal.Operation
+		op *pb.OperationArgs
 	}{
 		"Add": {
-			op: internal.OperationAdd("/a/b.txt", true),
+			op: internal.OperationAdd("/a/", true, "b.txt", 2024),
 		},
 		"Remove": {
 			op: internal.OperationRemove("/a/b.txt"),
@@ -25,13 +42,16 @@ func TestLogger_Info(t *testing.T) {
 		},
 	}
 	for _, c := range test {
-		SM.Info(c.op)
+		_ = SM.Info(c.op)
 	}
+	stat, err := os.Stat(LogFileName)
+	assert.Nil(t, err)
+	assert.NotNil(t, stat)
 }
 
 func TestReadLogLines(t *testing.T) {
 	test := []string{"Add", "Remove", "Rename", "Move"}
-	res := SM.readLogLines()
+	res := SM.readLogLines(LogFileName)
 	defer func() {
 		_ = os.Remove(".\\edits.txt")
 	}()
@@ -42,13 +62,13 @@ func TestReadLogLines(t *testing.T) {
 
 func TestRootSerialize(t *testing.T) {
 	_ = os.Remove(internal.RootFileName)
-	internal.RootSerialize()
+	SM.RootSerialize()
 }
 
 func TestReadRootLines(t *testing.T) {
 	_ = os.Remove(internal.RootFileName)
 	//internal.initRoot("/a/b/c.txt")
-	internal.RootSerialize()
+	SM.RootSerialize()
 	res := SM.readRootLines()
 	assert.Equal(t, 4, len(res))
 	for id, n := range res {
@@ -59,8 +79,8 @@ func TestReadRootLines(t *testing.T) {
 func TestRootUnSerialize(t *testing.T) {
 	_ = os.Remove(internal.RootFileName)
 	//internal.initRoot("/a/b/c.txt")
-	internal.RootSerialize()
-	SM.RootUnSerialize(SM.readRootLines())
+	SM.RootSerialize()
+	SM.RootDeserialize(SM.readRootLines())
 	assert.NotNil(t, SM.shadowRoot)
 	assert.Equal(t, 1, len(SM.shadowRoot.ChildNodes))
 	child1, ok := SM.shadowRoot.ChildNodes["a"]
