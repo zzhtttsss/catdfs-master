@@ -75,13 +75,19 @@ func GetDataNode(id string) *DataNode {
 // 2. Select the node with the least number of leases from these nodes as the primary DataNode of the Chunk
 func AllocateDataNodes() ([]*DataNode, *DataNode) {
 	updateHeapLock.Lock()
-	dataNodes := make([]*DataNode, viper.GetInt(common.ReplicaNum))
-	copy(dataNodes, dataNodeHeap)
+	allDataNodes := make([]*DataNode, viper.GetInt(common.ReplicaNum))
+	copy(allDataNodes, dataNodeHeap)
 	updateHeapLock.Unlock()
-	primaryNode := dataNodes[0]
-	for _, node := range dataNodes {
+	primaryNode := allDataNodes[0]
+	for _, node := range allDataNodes {
 		if node.Leases.Cardinality() < primaryNode.Leases.Cardinality() {
 			primaryNode = node
+		}
+	}
+	dataNodes := make([]*DataNode, viper.GetInt(common.ReplicaNum)-1)
+	for _, node := range allDataNodes {
+		if node.Id != primaryNode.Id {
+			dataNodes = append(dataNodes, node)
 		}
 	}
 	adjust4Allocate()
