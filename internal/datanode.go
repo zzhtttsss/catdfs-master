@@ -2,7 +2,6 @@ package internal
 
 import (
 	mapset "github.com/deckarep/golang-set"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"sync"
 	"time"
@@ -76,16 +75,12 @@ func GetDataNode(id string) *DataNode {
 // 2. Select the node with the least number of leases from these nodes as the primary DataNode of the Chunk
 func AllocateDataNodes() ([]*DataNode, *DataNode) {
 	updateHeapLock.Lock()
-	logrus.Infof("length of dataNodeHeap is : %v", dataNodeHeap.Len())
-
 	allDataNodes := make([]*DataNode, dataNodeHeap.Len())
 	copy(allDataNodes, dataNodeHeap)
 	updateHeapLock.Unlock()
 	// TODO if there is no chunkserver in system, it will cause a panic.
 	primaryNode := allDataNodes[0]
-	logrus.Infof("nodes len is : %v", len(allDataNodes))
 	for _, node := range allDataNodes {
-		logrus.Infof("primary lease len is : %v", primaryNode.Leases.Cardinality())
 		if node.Leases.Cardinality() < primaryNode.Leases.Cardinality() {
 			primaryNode = node
 		}
@@ -132,16 +127,9 @@ func Adjust4Add(node *DataNode) {
 }
 
 func adjust(node *DataNode) {
-	logrus.Info("start to adjust")
-	logrus.Infof("len is %v", dataNodeHeap.Len())
-
 	if dataNodeHeap.Len() < viper.GetInt(common.ReplicaNum) {
-		logrus.Info("start to push")
 		dataNodeHeap.Push(node)
-		logrus.Info("finish to push")
-
 	} else {
-		logrus.Info("start to pop")
 		topNode := dataNodeHeap.Pop().(*DataNode)
 		if topNode.Chunks.Cardinality() > node.Chunks.Cardinality() {
 			dataNodeHeap.Push(node)

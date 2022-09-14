@@ -96,11 +96,7 @@ func DoGetDataNodes4Add(fileNodeId string, chunkIndex int32) ([]string, string, 
 		dataNodeIds   = make([]string, len(dataNodes))
 		dataNodeAddrs = make([]string, len(dataNodes))
 	)
-	logrus.Infof("length of dataNodes is : %v", len(dataNodes))
 	for i, node := range dataNodes {
-		if node == nil {
-			logrus.Infof("nil node index is %v", i)
-		}
 		node.Chunks.Add(chunkId)
 		dataNodeIds[i] = node.Id
 		dataNodeAddrs[i] = node.Address
