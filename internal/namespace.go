@@ -3,11 +3,13 @@ package internal
 import (
 	"container/list"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"math"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"tinydfs-base/common"
 	"tinydfs-base/util"
 )
 
@@ -67,6 +69,17 @@ func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 	path = strings.Trim(path, pathSplitString)
 	fileNames := strings.Split(path, pathSplitString)
 	stack := list.New()
+
+	if path == root.FileName {
+		if isRead {
+			currentNode.updateNodeLock.RLock()
+		} else {
+			currentNode.updateNodeLock.Lock()
+		}
+		currentNode.LastLockTime = time.Now()
+		stack.PushBack(currentNode)
+		return currentNode, stack, true
+	}
 
 	for _, name := range fileNames {
 		currentNode.updateNodeLock.RLock()
@@ -137,6 +150,7 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 
 func LockAndAddFileNode(path string, filename string, size int64, isFile bool) (*FileNode, *list.List, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
+	logrus.Infof("exist : %v", isExist)
 	if !isExist {
 		return nil, nil, fmt.Errorf("path not exist, path : %s", path)
 	}
@@ -163,7 +177,7 @@ func LockAndAddFileNode(path string, filename string, size int64, isFile bool) (
 }
 
 func initChunks(size int64, id string) []string {
-	nums := int(math.Ceil(float64(size) / float64(chunkSize) / float64(chunkByteNum)))
+	nums := int(math.Ceil(float64(size) / float64(common.ChunkSize)))
 	chunks := make([]string, nums)
 	for i := 0; i < len(chunks); i++ {
 		chunks[i] = id + strconv.Itoa(i)

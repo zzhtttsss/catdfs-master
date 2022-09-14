@@ -99,6 +99,7 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 		DataNodes:   dataNodes,
 		PrimaryNode: primaryNode,
 	}
+	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk for add operation, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
 	return rep, nil
 
 }
