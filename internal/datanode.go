@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	mapset "github.com/deckarep/golang-set"
 	"github.com/spf13/viper"
 	"sync"
@@ -137,4 +138,17 @@ func adjust(node *DataNode) {
 			dataNodeHeap.Push(topNode)
 		}
 	}
+}
+
+func ReleaseLease(fileNodeId string, chunkId string) error {
+	updateMapLock.RLock()
+	defer func() {
+		updateMapLock.RUnlock()
+	}()
+	fileNode, ok := dataNodeMap[fileNodeId]
+	if !ok {
+		return fmt.Errorf("fail to get FileNode from dataNodeMap, fileNodeId : %s", fileNodeId)
+	}
+	fileNode.Leases.Remove(chunkId)
+	return nil
 }

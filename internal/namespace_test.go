@@ -101,7 +101,7 @@ func TestGetAndLockByPath(t *testing.T) {
 				node, ok := s.Back().Value.(*FileNode)
 				assert.True(t, ok)
 				assert.Equal(t, c.expectCanReadLockOn, node.updateNodeLock.TryRLock())
-				UnlockAllMutex(s, c.isRead)
+				unlockAllMutex(s, c.isRead)
 			}
 		})
 	}
