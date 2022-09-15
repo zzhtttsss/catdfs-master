@@ -34,8 +34,8 @@ var (
 	// Store all locked nodes.
 	// All nodes locked by an operation will be placed on a stack as the value of the map.
 	// The id of the FileNode being operated is used as the key.
-	unlockedFileNodes = make(map[string]*list.List)
-	fileNodesMapLock  = &sync.Mutex{}
+	lockedFileNodes  = make(map[string]*list.List)
+	fileNodesMapLock = &sync.Mutex{}
 )
 
 type FileNode struct {
@@ -60,7 +60,7 @@ func CheckAndGetFileNode(path string) (*FileNode, error) {
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-	defer UnlockAllMutex(stack, true)
+	defer unlockAllMutex(stack, true)
 	return fileNode, nil
 }
 
@@ -87,7 +87,7 @@ func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 		stack.PushBack(currentNode)
 		nextNode, exist := currentNode.childNodes[name]
 		if !exist {
-			UnlockAllMutex(stack, true)
+			unlockAllMutex(stack, true)
 			return nil, stack, false
 		}
 		currentNode = nextNode
@@ -102,7 +102,7 @@ func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 	return currentNode, stack, true
 }
 
-func UnlockAllMutex(stack *list.List, isRead bool) {
+func unlockAllMutex(stack *list.List, isRead bool) {
 	firstElement := stack.Back()
 	firstNode := firstElement.Value.(*FileNode)
 	if isRead {
@@ -120,12 +120,24 @@ func UnlockAllMutex(stack *list.List, isRead bool) {
 	}
 }
 
+func UnlockFileNodesById(fileNodeId string, isRead bool) error {
+	fileNodesMapLock.Lock()
+	stack, ok := lockedFileNodes[fileNodeId]
+	fileNodesMapLock.Unlock()
+	if !ok {
+		logrus.Errorf("fail to find stack by FileNodeId : %s", fileNodeId)
+		return fmt.Errorf("fail to find stack by FileNodeId : %s", fileNodeId)
+	}
+	unlockAllMutex(stack, isRead)
+	return nil
+}
+
 func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-	defer UnlockAllMutex(stack, false)
+	defer unlockAllMutex(stack, false)
 
 	id := util.GenerateUUIDString()
 	newNode := &FileNode{
@@ -191,11 +203,11 @@ func MoveFileNode(currentPath string, targetPath string) (*FileNode, error) {
 	if !isExist {
 		return nil, fmt.Errorf("current path not exist, path : %s", currentPath)
 	}
-	defer UnlockAllMutex(stack, false)
+	defer unlockAllMutex(stack, false)
 	if !isParentExist {
 		return nil, fmt.Errorf("target path not exist, path : %s", targetPath)
 	}
-	defer UnlockAllMutex(parentStack, false)
+	defer unlockAllMutex(parentStack, false)
 	if newParentNode.childNodes[fileNode.FileName] != nil {
 		return nil, fmt.Errorf("target path already has file with the same name, filename : %s", fileNode.FileName)
 	}
@@ -211,7 +223,7 @@ func RemoveFileNode(path string) (*FileNode, error) {
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-	defer UnlockAllMutex(stack, false)
+	defer unlockAllMutex(stack, false)
 
 	fileNode.FileName = deleteFilePrefix + fileNode.FileName
 	fileNode.IsDel = true
@@ -225,7 +237,7 @@ func ListFileNode(path string) ([]*FileNode, error) {
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-	defer UnlockAllMutex(stack, true)
+	defer unlockAllMutex(stack, true)
 
 	fileNodes := make([]*FileNode, len(fileNode.childNodes))
 	nodeIndex := 0
@@ -241,7 +253,7 @@ func RenameFileNode(path string, newName string) (*FileNode, error) {
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-	defer UnlockAllMutex(stack, false)
+	defer unlockAllMutex(stack, false)
 
 	delete(fileNode.parentNode.childNodes, fileNode.FileName)
 	fileNode.FileName = newName

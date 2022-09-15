@@ -101,7 +101,24 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 	}
 	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk for add operation, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
 	return rep, nil
+}
 
+// UnlockDic4Add Called by client.
+// Unlock all FileNode in the target path which is used to add file.
+func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.UnlockDic4AddArgs) (*pb.UnlockDic4AddReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for unlock FileNodes in the target path from client, FileNodeId: %s", args.FileNodeId)
+	err := DoUnlockDic4Add(args.FileNodeId, false)
+	if err != nil {
+		logrus.Errorf("Fail to unlock FileNodes in the target path, error code: %v, error detail: %s,", common.MasterUnlockDic4AddFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterUnlockDic4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.UnlockDic4AddReply{}
+	logrus.WithContext(ctx).Infof("Success to unlock FileNodes in the target path, FileNodeId: %s", args.FileNodeId)
+	return rep, nil
 }
 
 func (handler *MasterHandler) Server() {

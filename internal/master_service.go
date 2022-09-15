@@ -81,7 +81,7 @@ func DoHeartbeat(Id string) error {
 func DoCheckArgs4Add(args *pb.CheckArgs4AddArgs) (string, int32, error) {
 	fileNode, stack, err := LockAndAddFileNode(args.Path, args.FileName, args.Size, isFile4File)
 	fileNodesMapLock.Lock()
-	unlockedFileNodes[fileNode.Id] = stack
+	lockedFileNodes[fileNode.Id] = stack
 	fileNodesMapLock.Unlock()
 	if err != nil {
 		return "", 0, err
@@ -110,4 +110,12 @@ func DoGetDataNodes4Add(fileNodeId string, chunkIndex int32) ([]string, string, 
 	}
 	AddChunk(chunk)
 	return dataNodeAddrs, primaryNode.Address, nil
+}
+
+func DoUnlockDic4Add(fileNodeId string, isRead bool) error {
+	err := UnlockFileNodesById(fileNodeId, isRead)
+	if err != nil {
+		return err
+	}
+	return nil
 }
