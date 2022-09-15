@@ -75,36 +75,55 @@ func GetDataNode(id string) *DataNode {
 // 2. Select the node with the least number of leases from these nodes as the primary DataNode of the Chunk
 func AllocateDataNodes() ([]*DataNode, *DataNode) {
 	updateHeapLock.Lock()
-	dataNodes := make([]*DataNode, viper.GetInt(common.ReplicaNum))
-	copy(dataNodes, dataNodeHeap)
+	allDataNodes := make([]*DataNode, dataNodeHeap.Len())
+	copy(allDataNodes, dataNodeHeap)
 	updateHeapLock.Unlock()
-	primaryNode := dataNodes[0]
-	for _, node := range dataNodes {
+	// TODO if there is no chunkserver in system, it will cause a panic.
+	primaryNode := allDataNodes[0]
+	for _, node := range allDataNodes {
 		if node.Leases.Cardinality() < primaryNode.Leases.Cardinality() {
 			primaryNode = node
+		}
+	}
+	dataNodes := make([]*DataNode, len(allDataNodes)-1)
+	index := 0
+	for _, node := range allDataNodes {
+		if node.Id != primaryNode.Id {
+			dataNodes[index] = node
+			index++
 		}
 	}
 	adjust4Allocate()
 	return dataNodes, primaryNode
 }
 
-func RemoveChunk(chunkId, node *DataNode) {
+func RemoveChunk(chunkId string, node *DataNode) {
 	node.Chunks.Remove(chunkId)
 	adjust4Remove(node)
 }
 
 func adjust4Allocate() {
 	updateMapLock.RLock()
+	updateHeapLock.Lock()
 	dataNodeHeap = dataNodeHeap[0:0]
 	for _, node := range dataNodeMap {
 		adjust(node)
 	}
+	updateHeapLock.Unlock()
 	updateMapLock.RUnlock()
 
 }
 
 func adjust4Remove(node *DataNode) {
+	updateHeapLock.Lock()
 	adjust(node)
+	updateHeapLock.Unlock()
+}
+
+func Adjust4Add(node *DataNode) {
+	updateHeapLock.Lock()
+	adjust(node)
+	updateHeapLock.Unlock()
 }
 
 func adjust(node *DataNode) {

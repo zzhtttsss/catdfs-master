@@ -9,23 +9,25 @@ import (
 	"github.com/spf13/viper"
 	"google.golang.org/grpc/peer"
 	"strconv"
+	"strings"
 	"time"
 	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
 )
 
 const (
-	IsFile4File = true
+	isFile4File = true
 )
 
-func DoRegister(ctx context.Context) (string, string, error) {
+func DoRegister(ctx context.Context) (string, error) {
 	var (
 		id      string
 		address string
 	)
 	p, _ := peer.FromContext(ctx)
 	id = uuid.NewString()
-	address = p.Addr.String()
+	address = strings.Split(p.Addr.String(), ":")[0]
+
 	logrus.WithContext(ctx).Infof("Receive register request from %s", address)
 
 	// 定时器，10秒无心跳则等待重连，十分钟无心跳则判定离线
@@ -41,6 +43,7 @@ func DoRegister(ctx context.Context) (string, string, error) {
 		dieTimer:  dieTimer,
 	}
 	AddDataNode(datanode)
+	Adjust4Add(datanode)
 	dieTimer.Stop()
 	go func(ctx context.Context) {
 		for {
@@ -59,7 +62,7 @@ func DoRegister(ctx context.Context) (string, string, error) {
 	}(ctx)
 
 	logrus.WithContext(ctx).Infof("[Id=%s] Connected", id)
-	return id, address, nil
+	return id, nil
 }
 
 func DoHeartbeat(Id string) error {
@@ -76,7 +79,7 @@ func DoHeartbeat(Id string) error {
 }
 
 func DoCheckArgs4Add(args *pb.CheckArgs4AddArgs) (string, int32, error) {
-	fileNode, stack, err := LockAndAddFileNode(args.Path, args.FileName, args.Size, IsFile4File)
+	fileNode, stack, err := LockAndAddFileNode(args.Path, args.FileName, args.Size, isFile4File)
 	fileNodesMapLock.Lock()
 	unlockedFileNodes[fileNode.Id] = stack
 	fileNodesMapLock.Unlock()
@@ -87,13 +90,12 @@ func DoCheckArgs4Add(args *pb.CheckArgs4AddArgs) (string, int32, error) {
 }
 
 func DoGetDataNodes4Add(fileNodeId string, chunkIndex int32) ([]string, string, error) {
-	var (
-		dataNodeIds   = make([]string, viper.GetInt(common.ReplicaNum))
-		dataNodeAddrs = make([]string, viper.GetInt(common.ReplicaNum))
-	)
-	chunkId := fileNodeId + strconv.Itoa(int(chunkIndex))
+	chunkId := fileNodeId + common.ChunkIdDelimiter + strconv.Itoa(int(chunkIndex))
 	dataNodes, primaryNode := AllocateDataNodes()
-
+	var (
+		dataNodeIds   = make([]string, len(dataNodes))
+		dataNodeAddrs = make([]string, len(dataNodes))
+	)
 	for i, node := range dataNodes {
 		node.Chunks.Add(chunkId)
 		dataNodeIds[i] = node.Id
