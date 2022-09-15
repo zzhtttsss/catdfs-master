@@ -39,6 +39,8 @@ const (
 	Operation_Rename = "Rename"
 	Operation_List   = "List"
 	Operation_Mkdir  = "Mkdir"
+	Operation_Stat   = "Stat"
+	Operation_Finish = "Finish"
 )
 
 func OperationAdd(des string, isFile bool, fileName string, size int64) *pb.OperationArgs {
@@ -92,6 +94,22 @@ func OperationMkdir(des string) *pb.OperationArgs {
 		Uuid: util.GenerateUUIDString(),
 		Type: Operation_Mkdir,
 		Des:  des,
+	}
+}
+
+func OperationStat(path string) *pb.OperationArgs {
+	return &pb.OperationArgs{
+		Uuid: util.GenerateUUIDString(),
+		Type: Operation_Stat,
+		Des:  path,
+	}
+}
+
+func FinishOperation(uuid string) *pb.OperationArgs {
+	return &pb.OperationArgs{
+		Uuid:     uuid,
+		Type:     Operation_Finish,
+		IsFinish: true,
 	}
 }
 
@@ -207,6 +225,10 @@ func ReadLogLines(path string) []*pb.OperationArgs {
 		right := strings.Index(line, "}")
 		op := &pb.OperationArgs{}
 		util.Unmarshal(line[left:right+1], op)
+		// Ignore the non-update operation
+		if op.Type == Operation_Stat || op.Type == Operation_List {
+			continue
+		}
 		// Map is used to filter which operation is finished
 		_, ok := opMap[op.Uuid]
 		if !ok {
