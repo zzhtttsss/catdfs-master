@@ -64,7 +64,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 // CheckArgs4Add Called by client.
 // Check whether the path and file name entered by the user in the Add operation are legal.
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
+	logrus.WithContext(ctx).Infof("Get request for checking add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
 	fileNodeId, chunkNum, err := DoCheckArgs4Add(args)
 	if err != nil {
 		logrus.Errorf("Fail to check path and filename for add operation, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
@@ -85,7 +85,7 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 // GetDataNodes4Add Called by client.
 // Allocate some DataNode to store a Chunk and select the primary DataNode
 func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.GetDataNodes4AddArgs) (*pb.GetDataNodes4AddReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for get dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
+	logrus.WithContext(ctx).Infof("Get request for getting dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
 	dataNodes, primaryNode, err := DoGetDataNodes4Add(args.FileNodeId, args.ChunkIndex)
 	if err != nil {
 		logrus.Errorf("Fail to get dataNodes for single chunk for add operation, error code: %v, error detail: %s,", common.MasterGetDataNodes4AddFailed, err.Error())
@@ -106,7 +106,7 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 // UnlockDic4Add Called by client.
 // Unlock all FileNode in the target path which is used to add file.
 func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.UnlockDic4AddArgs) (*pb.UnlockDic4AddReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for unlock FileNodes in the target path from client, FileNodeId: %s", args.FileNodeId)
+	logrus.WithContext(ctx).Infof("Get request for unlocking FileNodes in the target path from client, FileNodeId: %s", args.FileNodeId)
 	err := DoUnlockDic4Add(args.FileNodeId, false)
 	if err != nil {
 		logrus.Errorf("Fail to unlock FileNodes in the target path, error code: %v, error detail: %s,", common.MasterUnlockDic4AddFailed, err.Error())
@@ -118,6 +118,24 @@ func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.Unlock
 	}
 	rep := &pb.UnlockDic4AddReply{}
 	logrus.WithContext(ctx).Infof("Success to unlock FileNodes in the target path, FileNodeId: %s", args.FileNodeId)
+	return rep, nil
+}
+
+// ReleaseLease4Add Called by client.
+// Release the lease of a chunk.
+func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.ReleaseLease4AddArgs) (*pb.ReleaseLease4AddReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
+	err := DoReleaseLease4Add(args.ChunkId)
+	if err != nil {
+		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4AddFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterReleaseLease4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.ReleaseLease4AddReply{}
+	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
 	return rep, nil
 }
 

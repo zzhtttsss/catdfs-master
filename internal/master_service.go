@@ -117,5 +117,15 @@ func DoUnlockDic4Add(fileNodeId string, isRead bool) error {
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func DoReleaseLease4Add(chunkId string) error {
+	chunk := GetChunk(chunkId)
+	err := ReleaseLease(chunk.primaryNode, chunkId)
+	if err != nil {
+		return err
+	}
 	return nil
 }
