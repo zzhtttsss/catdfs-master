@@ -32,12 +32,12 @@ WORKDIR /app
 ADD . /app
 
 # m
-#EXPOSE 9100
-#RUN CGO_ENABLED=0 GOOS=linux go build ./cmd/main.go
+EXPOSE 9099
+RUN CGO_ENABLED=0 GOOS=linux go build ./cmd/main.go
 
 # sm
-EXPOSE 9100
-RUN CGO_ENABLED=0 GOOS=linux go build ./shadow_master/cmd/main.go
+#EXPOSE 9100
+#RUN CGO_ENABLED=0 GOOS=linux go build ./shadow_master/cmd/main.go
 
 
 ENTRYPOINT ["./main"]
