@@ -5,7 +5,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"tinydfs-base/util"
 )
 
 type NodeTestCase struct {
@@ -104,8 +103,8 @@ func TestGetAndLockByPath(t *testing.T) {
 			if s.Len() != 0 {
 				node, ok := s.Back().Value.(*FileNode)
 				assert.True(t, ok)
-				assert.Equal(t, c.expectCanReadLockOn, node.UpdateNodeLock.TryRLock())
-				UnlockAllMutex(s, c.isRead)
+				assert.Equal(t, c.expectCanReadLockOn, node.updateNodeLock.TryRLock())
+				unlockAllMutex(s, c.isRead)
 			}
 		})
 	}
@@ -197,7 +196,7 @@ func TestRemoveFileNode(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.ChildNodes = map[string]*FileNode{}
+				root.childNodes = map[string]*FileNode{}
 			}()
 			if c.initRoot != nil {
 				c.initRoot(c.path)
