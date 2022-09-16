@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"net"
 	"os"
@@ -16,7 +17,10 @@ import (
 
 var GlobalMasterHandler *MasterHandler
 
+const maxErrorCount = 3
+
 type MasterHandler struct {
+	ClientCon *grpc.ClientConn
 	pb.UnimplementedRegisterServiceServer
 	pb.UnimplementedHeartbeatServiceServer
 	pb.UnimplementedMasterAddServiceServer
@@ -27,7 +31,18 @@ func CreateMasterHandler() {
 	config.InitConfig()
 	RootDeserialize(root, ReadRootLines())
 	Merge2Root(root, ReadLogLines(LogFileName))
-	GlobalMasterHandler = &MasterHandler{}
+	// Connect Shadow master
+	addr := viper.GetString(common.SMAddr) + viper.GetString(common.SMPort)
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	errCount := 0
+	for err != nil && errCount < maxErrorCount {
+		conn, err = grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		errCount++
+	}
+	if errCount < maxErrorCount {
+		logrus.Info("Success Connect to Shadow master!")
+	}
+	GlobalMasterHandler = &MasterHandler{ClientCon: conn}
 }
 
 // Heartbeat 由Chunkserver调用该方法，维持心跳
@@ -76,9 +91,21 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 		})
 		return nil, details.Err()
 	}
+	client := pb.NewSendOperationServiceClient(handler.ClientCon)
+	op := OperationAdd(args.Path, true, args.FileName, args.Size)
+	_, err = client.SendOperation(context.Background(), op)
+	if err != nil {
+		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckArgs4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
 	rep := &pb.CheckArgs4AddReply{
 		FileNodeId: fileNodeId,
 		ChunkNum:   chunkNum,
+		Uuid:       op.Uuid,
 	}
 	return rep, nil
 
@@ -102,7 +129,27 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 		PrimaryNode: primaryNode,
 	}
 	return rep, nil
+}
 
+// UnlockDic4Add Called by client.
+// unlock all files
+func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.UnlockDic4AddArgs) (*pb.UnlockDic4AddReply, error) {
+	//TODO
+	client := pb.NewSendOperationServiceClient(handler.ClientCon)
+	_, err := client.FinishOperation(context.Background(), &pb.OperationArgs{
+		Uuid:     args.OperationUuid,
+		IsFinish: true,
+	})
+	if err != nil {
+		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterFinishOperationFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterGetDataNodes4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.UnlockDic4AddReply{}
+	return rep, nil
 }
 
 func (handler *MasterHandler) Server() {

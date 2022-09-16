@@ -48,6 +48,18 @@ func (sm *ShadowMasterHandler) SendOperation(ctx context.Context, args *pb.Opera
 	return &pb.OperationReply{Ok: true}, nil
 }
 
+func (sm *ShadowMasterHandler) FinishOperation(ctx context.Context, args *pb.OperationArgs) (*pb.OperationReply, error) {
+	err := DoFinishOperation(args)
+	if err != nil {
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.ShadowMasterFinishOperationFailed,
+			Msg:  err.Error(),
+		})
+		return &pb.OperationReply{Ok: false}, details.Err()
+	}
+	return &pb.OperationReply{Ok: true}, nil
+}
+
 func (sm *ShadowMasterHandler) FsimageFlush() {
 	for {
 		select {
@@ -94,6 +106,6 @@ func (sm *ShadowMasterHandler) Server() {
 	}
 	server := grpc.NewServer()
 	pb.RegisterSendOperationServiceServer(server, sm)
-	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
+	logrus.Infof("Shdow Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.SMPort))
 	server.Serve(listener)
 }
