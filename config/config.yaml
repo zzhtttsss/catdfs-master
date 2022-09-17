@@ -1,13 +1,13 @@
 # master 配置
 master:
-  #addr: "172.18.0.11"
-  addr: "127.0.0.1"
+  addr: "172.18.0.11"
+#  addr: "127.0.0.1"
   port: ":9099"
 
 # shadow master 配置
 shadowMaster:
-  #addr: "172.18.0.12"
-  addr: "127.0.0.1"
+  addr: "172.18.0.12"
+#  addr: "127.0.0.1"
   port: ":9100"
   fsimageFlushTime: 300    # 每隔 3600s 进行一次合并落盘
 

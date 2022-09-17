@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	LogFileName       = ".\\edits.txt"
-	DirectoryFileName = ".\\fsimage.txt"
+	LogFileName       = "log/edits.txt"
+	DirectoryFileName = "log/fsimage.txt"
 )
 
 type ShadowMaster struct {
@@ -38,7 +38,7 @@ func CreateShadowMaster() *ShadowMaster {
 	SM.log.SetFormatter(&logrus.TextFormatter{
 		TimestampFormat: "2006-01-02 15:04:05",
 	})
-	writer, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_APPEND, 0755)
+	writer, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0755)
 	if err != nil {
 		log.Panicf("Create file %s failed: %v\n", LogFileName, err)
 	}

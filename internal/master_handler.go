@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"net"
 	"os"
@@ -82,6 +83,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
 	fileNodeId, chunkNum, err := DoCheckArgs4Add(args)
+	logrus.Infof("fileNodeId[%s] with chunkNum[%d]", fileNodeId, chunkNum)
 	if err != nil {
 		logrus.Errorf("Fail to check path and filename for add operation, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{

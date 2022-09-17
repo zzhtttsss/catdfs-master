@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"tinydfs-base/common"
 	"tinydfs-base/util"
 )
 
@@ -17,11 +16,11 @@ const (
 	kb               = 1024
 	mb               = 1048576
 	chunkByteNum     = 1024
-	chunkSize        = 1
+	chunkSize        = 64
 	rootFileName     = ""
 	pathSplitString  = "/"
 	deleteFilePrefix = "delete"
-	RootFileName     = ".\\fsimage.txt"
+	RootFileName     = "log/fsimage.txt"
 	TimeFormat       = "2006-01-02-15.04.05"
 )
 
@@ -30,8 +29,8 @@ var (
 	root = &FileNode{
 		Id:             util.GenerateUUIDString(),
 		FileName:       rootFileName,
-		childNodes:     make(map[string]*FileNode),
-		updateNodeLock: &sync.RWMutex{},
+		ChildNodes:     make(map[string]*FileNode),
+		UpdateNodeLock: &sync.RWMutex{},
 	}
 	// Store all locked nodes.
 	// All nodes locked by an operation will be placed on a stack as the value of the map.
@@ -89,9 +88,9 @@ func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 
 	if path == root.FileName {
 		if isRead {
-			currentNode.updateNodeLock.RLock()
+			currentNode.UpdateNodeLock.RLock()
 		} else {
-			currentNode.updateNodeLock.Lock()
+			currentNode.UpdateNodeLock.Lock()
 		}
 		currentNode.LastLockTime = time.Now()
 		stack.PushBack(currentNode)
@@ -206,7 +205,7 @@ func LockAndAddFileNode(path string, filename string, size int64, isFile bool) (
 }
 
 func initChunks(size int64, id string) []string {
-	nums := int(math.Ceil(float64(size) / float64(chunkSize) / float64(chunkByteNum)))
+	nums := int(math.Ceil(float64(size) / float64(chunkSize) / float64(mb)))
 	chunks := make([]string, nums)
 	for i := 0; i < len(chunks); i++ {
 		chunks[i] = id + strconv.Itoa(i)

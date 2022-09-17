@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"container/list"
 	"github.com/sirupsen/logrus"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -28,8 +27,8 @@ const (
 )
 
 const (
-	LogFileName       = ".\\edits.txt"
-	DirectoryFileName = ".\\fsimage.txt"
+	LogFileName       = "log/edits.txt"
+	DirectoryFileName = "log/fsimage.txt"
 )
 
 const (
@@ -206,8 +205,9 @@ func Mkdir2Root(root *FileNode, op *pb.OperationArgs) {
 //ReadLogLines read the `path` log and find all of the finished operations
 func ReadLogLines(path string) []*pb.OperationArgs {
 	f, err := os.Open(path)
+	defer f.Close()
 	if err != nil {
-		log.Panicf("Open edits file failed.Error detail %v\n", err)
+		logrus.Warnf("Open edits file failed.Error detail %v\n", err)
 		//TODO 需要额外处理
 		return nil
 	}
@@ -234,7 +234,7 @@ func ReadLogLines(path string) []*pb.OperationArgs {
 		if !ok {
 			opMap[op.Uuid] = op
 		} else {
-			res = append(res, op)
+			res = append(res, opMap[op.Uuid])
 		}
 	}
 	return res
@@ -242,8 +242,9 @@ func ReadLogLines(path string) []*pb.OperationArgs {
 
 func ReadRootLines() map[string]*FileNode {
 	f, err := os.Open(RootFileName)
+	defer f.Close()
 	if err != nil {
-		log.Panicf("Open fsimage file failed: %v\n", err)
+		logrus.Warnf("Open fsimage file failed: %v\n", err)
 		//TODO 需要额外处理
 		return nil
 	}
@@ -298,7 +299,8 @@ func RootSerialize(root *FileNode) {
 		return
 	}
 	// Write root level-order in the fsimage
-	file, err := os.OpenFile(DirectoryFileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0755)
+	file, err := os.OpenFile(DirectoryFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+	defer file.Close()
 	if err != nil {
 		logrus.Warnf("Open %s failed.Error Detail %s\n", DirectoryFileName, err)
 		return

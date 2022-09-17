@@ -73,16 +73,15 @@ func (sm *ShadowMasterHandler) FsimageFlush() {
 			}
 
 			// First rename the edits.log and create a new edits.log
-			pwd, _ := os.Getwd()
-			newPath := fmt.Sprintf("%s\\%s.log", pwd, time.Now().Format(internal.TimeFormat))
-			err = os.Rename(fmt.Sprintf("%s%s", pwd, LogFileName[1:]), newPath)
+			newPath := fmt.Sprintf("log/%s.log", time.Now().Format(internal.TimeFormat))
+			err = os.Rename(fmt.Sprintf("%s", LogFileName), newPath)
 			if err != nil {
 				logrus.Warnf("Rename edits.txt failed.Error detail %s\n", err)
 				//TODO continue的合理性
 				sm.SM.flushTimer.Reset(time.Duration(viper.GetInt(common.SMFsimageFlushTime)) * time.Second)
 				continue
 			}
-			newLogWriter, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_APPEND, 0755)
+			newLogWriter, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0755)
 			if err != nil {
 				logrus.Warnf("Create edits.txt failed.Error detail %s\n", err)
 			}
