@@ -32,7 +32,7 @@ func CreateSMHandler() {
 		SM: sm,
 	}
 	GlobalSMHandler.SM.flushTimer = time.NewTimer(time.Duration(viper.GetInt(common.SMFsimageFlushTime)) * time.Second)
-	go GlobalSMHandler.FsimageFlush()
+	go GlobalSMHandler.Flush4Fsimage()
 
 }
 
@@ -60,7 +60,7 @@ func (sm *ShadowMasterHandler) FinishOperation(ctx context.Context, args *pb.Ope
 	return &pb.OperationReply{Ok: true}, nil
 }
 
-func (sm *ShadowMasterHandler) FsimageFlush() {
+func (sm *ShadowMasterHandler) Flush4Fsimage() {
 	for {
 		select {
 		case <-sm.SM.flushTimer.C:
@@ -69,28 +69,28 @@ func (sm *ShadowMasterHandler) FsimageFlush() {
 			// At this time, all the operations should be blocked until a new edits.txt is created.
 			err := sm.SM.writer.Close()
 			if err != nil {
-				logrus.Warnf("Close edits.txt failed.Error detail %s\n", err)
+				logrus.Errorf("Close edits.txt failed. Error detail %s\n", err)
 			}
 
-			// First rename the edits.log and create a new edits.log
-			newPath := fmt.Sprintf("log/%s.log", time.Now().Format(internal.TimeFormat))
-			err = os.Rename(fmt.Sprintf("%s", LogFileName), newPath)
+			// 1. rename the edits.log and create a new edits.log
+			newPath := fmt.Sprintf("log/%s.log", time.Now().Format(common.LogFileTimeFormat))
+			err = os.Rename(fmt.Sprintf("%s", common.LogFileName), newPath)
 			if err != nil {
-				logrus.Warnf("Rename edits.txt failed.Error detail %s\n", err)
+				logrus.Errorf("Rename edits.txt failed. Error detail %s\n", err)
 				//TODO continue的合理性
 				sm.SM.flushTimer.Reset(time.Duration(viper.GetInt(common.SMFsimageFlushTime)) * time.Second)
 				continue
 			}
-			newLogWriter, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0755)
+			newLogWriter, err := os.OpenFile(common.LogFileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0755)
 			if err != nil {
-				logrus.Warnf("Create edits.txt failed.Error detail %s\n", err)
+				logrus.Errorf("Create edits.txt failed. Error detail %s\n", err)
 			}
 			sm.SM.log.SetOutput(newLogWriter)
 			sm.SM.writer = newLogWriter
-			// Second read edits.log and merge the operations onto the sm.directory
+			// 2. read edits.log and merge the operations onto the sm.directory
 			ops := internal.ReadLogLines(newPath)
 			internal.Merge2Root(sm.SM.shadowRoot, ops)
-			// Third serialize the sm.directory and store it in the fsimage.txt
+			// 3. serialize the sm.directory and store it in the fsimage.txt
 			internal.RootSerialize(sm.SM.shadowRoot)
 			sm.SM.flushTimer.Reset(time.Duration(viper.GetInt(common.SMFsimageFlushTime)) * time.Second)
 		}
@@ -100,11 +100,11 @@ func (sm *ShadowMasterHandler) FsimageFlush() {
 func (sm *ShadowMasterHandler) Server() {
 	listener, err := net.Listen(common.TCP, viper.GetString(common.SMPort))
 	if err != nil {
-		logrus.Errorf("Fail to server, error code: %v, error detail: %s,", common.MasterRPCServerFailed, err.Error())
+		logrus.Errorf("Fail to server, error code: %v, error detail: %s,", common.ShadowMasterRPCServerFailed, err.Error())
 		os.Exit(1)
 	}
 	server := grpc.NewServer()
 	pb.RegisterSendOperationServiceServer(server, sm)
-	logrus.Infof("Shdow Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.SMPort))
+	logrus.Infof("Shadow Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.SMPort))
 	server.Serve(listener)
 }

@@ -9,19 +9,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"tinydfs-base/common"
 	"tinydfs-base/util"
 )
 
 const (
-	kb               = 1024
-	mb               = 1048576
-	chunkByteNum     = 1024
-	chunkSize        = 64
 	rootFileName     = ""
 	pathSplitString  = "/"
 	deleteFilePrefix = "delete"
-	RootFileName     = "log/fsimage.txt"
-	TimeFormat       = "2006-01-02-15.04.05"
 )
 
 var (
@@ -60,12 +55,12 @@ func (f *FileNode) String() string {
 	res := strings.Builder{}
 	if f.ParentNode == nil {
 		res.WriteString(fmt.Sprintf("%s %s %s %d %s %d %v %v %v %s\n",
-			f.Id, f.FileName, "-1", len(f.ChildNodes), f.Chunks,
-			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(TimeFormat)))
+			f.Id, f.FileName, common.MinusOneString, len(f.ChildNodes), f.Chunks,
+			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(common.LogFileTimeFormat)))
 	} else {
 		res.WriteString(fmt.Sprintf("%s %s %s %d %s %d %v %v %v %s\n",
 			f.Id, f.FileName, f.ParentNode.Id, len(f.ChildNodes), f.Chunks,
-			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(TimeFormat)))
+			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(common.LogFileTimeFormat)))
 	}
 
 	return res.String()
@@ -205,7 +200,7 @@ func LockAndAddFileNode(path string, filename string, size int64, isFile bool) (
 }
 
 func initChunks(size int64, id string) []string {
-	nums := int(math.Ceil(float64(size) / float64(chunkSize) / float64(mb)))
+	nums := int(math.Ceil(float64(size) / float64(common.ChunkSize)))
 	chunks := make([]string, nums)
 	for i := 0; i < len(chunks); i++ {
 		chunks[i] = id + strconv.Itoa(i)

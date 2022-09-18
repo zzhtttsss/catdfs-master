@@ -7,13 +7,9 @@ import (
 	"os"
 	"sync"
 	"time"
+	"tinydfs-base/common"
 	"tinydfs-base/util"
 	"tinydfs-master/internal"
-)
-
-const (
-	LogFileName       = "log/edits.txt"
-	DirectoryFileName = "log/fsimage.txt"
 )
 
 type ShadowMaster struct {
@@ -36,24 +32,24 @@ func CreateShadowMaster() *ShadowMaster {
 		},
 	}
 	SM.log.SetFormatter(&logrus.TextFormatter{
-		TimestampFormat: "2006-01-02 15:04:05",
+		TimestampFormat: common.NormalTimeFormat,
 	})
-	writer, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0755)
+	writer, err := os.OpenFile(common.LogFileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0755)
 	if err != nil {
-		log.Panicf("Create file %s failed: %v\n", LogFileName, err)
+		log.Panicf("Create file %s failed: %v\n", common.LogFileName, err)
 	}
 	SM.writer = writer
 	SM.log.SetOutput(writer)
 	return SM
 }
 
-func (l *ShadowMaster) Info(a any) error {
-	l.m.Lock()
-	defer l.m.Unlock()
+func (sm *ShadowMaster) Info(a any) error {
+	sm.m.Lock()
+	defer sm.m.Unlock()
 	data, err := json.Marshal(a)
 	if err != nil {
 		return err
 	}
-	l.log.Info(string(data))
+	sm.log.Info(string(data))
 	return nil
 }

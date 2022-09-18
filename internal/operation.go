@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
 	"tinydfs-base/util"
 )
@@ -241,10 +242,10 @@ func ReadLogLines(path string) []*pb.OperationArgs {
 }
 
 func ReadRootLines() map[string]*FileNode {
-	f, err := os.Open(RootFileName)
+	f, err := os.Open(common.DirectoryFileName)
 	defer f.Close()
 	if err != nil {
-		logrus.Warnf("Open fsimage file failed: %v\n", err)
+		logrus.Errorf("Open fsimage file failed: %v\n", err)
 		//TODO 需要额外处理
 		return nil
 	}
@@ -264,7 +265,7 @@ func ReadRootLines() map[string]*FileNode {
 		}
 		size, _ := strconv.Atoi(data[sizeIdx])
 		isFile, _ := strconv.ParseBool(data[isFileIdx])
-		delTime, _ := time.Parse(TimeFormat, data[delTimeIdx])
+		delTime, _ := time.Parse(common.LogFileTimeFormat, data[delTimeIdx])
 		var delTimePtr *time.Time
 		if data[delTimeIdx] == "<nil>" {
 			delTimePtr = nil
@@ -272,7 +273,7 @@ func ReadRootLines() map[string]*FileNode {
 			delTimePtr = &delTime
 		}
 		isDel, _ := strconv.ParseBool(data[isDelIdx])
-		lastLockTime, _ := time.Parse(TimeFormat, data[lastLockTimeIdx])
+		lastLockTime, _ := time.Parse(common.LogFileTimeFormat, data[lastLockTimeIdx])
 		fn := &FileNode{
 			Id:       data[idIdx],
 			FileName: data[fileNameIdx],
@@ -308,7 +309,7 @@ func RootSerialize(root *FileNode) {
 	queue := list.New()
 	queue.PushBack(root)
 	for queue.Len() != 0 {
-		cur := queue.Back()
+		cur := queue.Front()
 		queue.Remove(cur)
 		node, ok := cur.Value.(*FileNode)
 		if !ok {
@@ -316,7 +317,7 @@ func RootSerialize(root *FileNode) {
 		}
 		_, err = file.WriteString(node.String())
 		if err != nil {
-			logrus.Warnf("Write String failed.Error Detail %s\n", err)
+			logrus.Errorf("Write String failed.Error Detail %s\n", err)
 		}
 		for _, child := range node.ChildNodes {
 			queue.PushBack(child)
