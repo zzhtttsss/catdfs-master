@@ -212,6 +212,7 @@ func (handler *MasterHandler) Server() {
 	pb.RegisterRegisterServiceServer(server, handler)
 	pb.RegisterHeartbeatServiceServer(server, handler)
 	pb.RegisterMasterAddServiceServer(server, handler)
+	pb.RegisterMasterMkdirServiceServer(server, handler)
 	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
 	server.Serve(listener)
 }
