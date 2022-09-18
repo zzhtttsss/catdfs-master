@@ -129,3 +129,11 @@ func DoReleaseLease4Add(chunkId string) error {
 	}
 	return nil
 }
+
+func DoCheckAndMkdir(path string, dirName string) error {
+	_, err := AddFileNode(path, dirName, common.DirSize, false)
+	if err != nil {
+		return err
+	}
+	return nil
+}

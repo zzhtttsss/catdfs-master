@@ -159,7 +159,6 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 
 func LockAndAddFileNode(path string, filename string, size int64, isFile bool) (*FileNode, *list.List, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
-	logrus.Infof("exist : %v", isExist)
 	if !isExist {
 		return nil, nil, fmt.Errorf("path not exist, path : %s", path)
 	}

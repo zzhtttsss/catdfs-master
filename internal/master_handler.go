@@ -24,6 +24,7 @@ type MasterHandler struct {
 	pb.UnimplementedRegisterServiceServer
 	pb.UnimplementedHeartbeatServiceServer
 	pb.UnimplementedMasterAddServiceServer
+	pb.UnimplementedMasterMkdirServiceServer
 }
 
 //CreateMasterHandler 创建MasterHandler
@@ -181,6 +182,24 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
 	return rep, nil
 
+}
+
+// CheckAndMkdir Called by client.
+// Check args and make directory at target path.
+func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckAndMkDirArgs) (*pb.CheckAndMkDirReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for checking args and make directory at target path from client, path: %s, dirName: %s", args.Path, args.DirName)
+	err := DoCheckAndMkdir(args.Path, args.DirName)
+	if err != nil {
+		logrus.Errorf("Fail to check args and make directory at target path, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndMkdirFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.CheckAndMkDirReply{}
+	logrus.WithContext(ctx).Infof("Success to check args and make directory at target path from client, path: %s, dirName: %s", args.Path, args.DirName)
+	return rep, nil
 }
 
 func (handler *MasterHandler) Server() {
