@@ -117,7 +117,6 @@ func DoUnlockDic4Add(fileNodeId string, isRead bool) error {
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 

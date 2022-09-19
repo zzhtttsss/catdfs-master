@@ -37,6 +37,7 @@ func CreateSMHandler() {
 }
 
 func (sm *ShadowMasterHandler) SendOperation(ctx context.Context, args *pb.OperationArgs) (*pb.OperationReply, error) {
+	logrus.Infof("Get an operation from master, operation id : %s", args.Uuid)
 	err := DoSendOperation(args)
 	if err != nil {
 		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
@@ -49,6 +50,7 @@ func (sm *ShadowMasterHandler) SendOperation(ctx context.Context, args *pb.Opera
 }
 
 func (sm *ShadowMasterHandler) FinishOperation(ctx context.Context, args *pb.OperationArgs) (*pb.OperationReply, error) {
+	logrus.Infof("Get an finish operation from master, operation id : %s", args.Uuid)
 	err := DoFinishOperation(args)
 	if err != nil {
 		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
@@ -93,6 +95,7 @@ func (sm *ShadowMasterHandler) Flush4Fsimage() {
 			// 3. serialize the sm.directory and store it in the fsimage.txt
 			internal.RootSerialize(sm.SM.shadowRoot)
 			sm.SM.flushTimer.Reset(time.Duration(viper.GetInt(common.SMFsimageFlushTime)) * time.Second)
+			logrus.Infof("Success to flush to Fsimage, time: %s", time.Now().String())
 		}
 	}
 }
