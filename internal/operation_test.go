@@ -38,6 +38,7 @@ func TestReadRootLines(t *testing.T) {
 			expectRoot: GetRootA(),
 		},
 	}
+
 	for n, c := range test {
 		t.Run(n, func(t *testing.T) {
 			teardown := createRootFile(c.expectRoot)
