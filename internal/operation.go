@@ -18,18 +18,13 @@ const (
 	idIdx = iota
 	fileNameIdx
 	parentIdIdx
-	childrenLengthIdx
+	childrenIdx
 	chunksIdIdx
 	sizeIdx
 	isFileIdx
 	delTimeIdx
 	isDelIdx
 	lastLockTimeIdx
-)
-
-const (
-	LogFileName       = "log/edits.txt"
-	DirectoryFileName = "log/fsimage.txt"
 )
 
 const (
@@ -241,8 +236,9 @@ func ReadLogLines(path string) []*pb.OperationArgs {
 	return res
 }
 
-func ReadRootLines() map[string]*FileNode {
-	f, err := os.Open(common.DirectoryFileName)
+// ReadRootLines returns map whose key is the id of the filenode rather than filename
+func ReadRootLines(path string) map[string]*FileNode {
+	f, err := os.Open(path)
 	defer f.Close()
 	if err != nil {
 		logrus.Errorf("Open fsimage file failed: %v\n", err)
@@ -253,7 +249,20 @@ func ReadRootLines() map[string]*FileNode {
 	res := map[string]*FileNode{}
 	for buf.Scan() {
 		line := buf.Text()
-		data := strings.Split(line, " ")
+		data := strings.Split(line, "$")
+		childrenLen := len(data[childrenIdx])
+		childrenData := data[childrenIdx][1 : childrenLen-1]
+		var children map[string]*FileNode
+		if childrenData == "" {
+			children = nil
+		} else {
+			children = map[string]*FileNode{}
+			for _, childId := range strings.Split(childrenData, " ") {
+				children[childId] = &FileNode{
+					Id: childId,
+				}
+			}
+		}
 		chunksLen := len(data[chunksIdIdx])
 		chunksData := data[chunksIdIdx][1 : chunksLen-1]
 		var chunks []string
@@ -280,7 +289,7 @@ func ReadRootLines() map[string]*FileNode {
 			ParentNode: &FileNode{
 				Id: data[parentIdIdx],
 			},
-			ChildNodes:     map[string]*FileNode{},
+			ChildNodes:     children,
 			Chunks:         chunks,
 			Size:           int64(size),
 			IsFile:         isFile,
@@ -300,10 +309,10 @@ func RootSerialize(root *FileNode) {
 		return
 	}
 	// Write root level-order in the fsimage
-	file, err := os.OpenFile(DirectoryFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+	file, err := os.OpenFile(common.DirectoryFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 	defer file.Close()
 	if err != nil {
-		logrus.Warnf("Open %s failed.Error Detail %s\n", DirectoryFileName, err)
+		logrus.Warnf("Open %s failed.Error Detail %s\n", common.DirectoryFileName, err)
 		return
 	}
 	queue := list.New()
@@ -326,23 +335,29 @@ func RootSerialize(root *FileNode) {
 }
 
 // RootDeserialize reads the fsimage.txt and rebuild the directory.
-func RootDeserialize(root *FileNode, rootMap map[string]*FileNode) {
+func RootDeserialize(rootMap map[string]*FileNode) *FileNode {
 	// Look for root
+	newRoot := &FileNode{}
 	for _, r := range rootMap {
-		if r.ParentNode.Id == "-1" {
-			root = r
+		if r.ParentNode.Id == common.MinusOneString {
+			newRoot = r
 			break
 		}
 	}
-	buildTree(root, rootMap)
+	buildTree(newRoot, rootMap)
+	newRoot.ParentNode = nil
+	return newRoot
 }
 
-//TODO 时间复杂度n^n 可优化
-func buildTree(parent *FileNode, nodeMap map[string]*FileNode) {
-	for _, cur := range nodeMap {
-		if cur.ParentNode.Id == parent.Id {
-			parent.ChildNodes[cur.FileName] = cur
-			buildTree(cur, nodeMap)
-		}
+func buildTree(cur *FileNode, nodeMap map[string]*FileNode) {
+	if cur == nil {
+		return
+	}
+	for id, _ := range cur.ChildNodes {
+		node := nodeMap[id]
+		delete(cur.ChildNodes, id)
+		cur.ChildNodes[node.FileName] = node
+		node.ParentNode = cur
+		buildTree(node, nodeMap)
 	}
 }

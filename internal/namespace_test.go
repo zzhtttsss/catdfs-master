@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"strings"
 	"sync"
@@ -289,4 +290,64 @@ func TestRenameFileNode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFileNodeString(t *testing.T) {
+	test := map[string]*struct {
+		node         *FileNode
+		expectString string
+	}{
+		"RootA": {
+			node:         GetRootA(),
+			expectString: "",
+		},
+		"Root": {
+			node:         root,
+			expectString: "",
+		},
+	}
+	for name, c := range test {
+		t.Run(name, func(t *testing.T) {
+			if name == "RootA" {
+				fmt.Println(c.node.String())
+				for _, n := range c.node.ChildNodes {
+					fmt.Println(n.String())
+				}
+			}
+		})
+	}
+}
+
+// getRootA returns /b.txt /c directory
+func GetRootA() *FileNode {
+	a := &FileNode{
+		Id:         util.GenerateUUIDString(),
+		FileName:   "",
+		ParentNode: nil,
+		ChildNodes: map[string]*FileNode{},
+		Chunks:     nil,
+		Size:       0,
+		IsFile:     false,
+	}
+	b := &FileNode{
+		Id:         util.GenerateUUIDString(),
+		FileName:   "b.txt",
+		ParentNode: a,
+		ChildNodes: nil,
+		Chunks:     []string{"chunk1", "chunk2"},
+		Size:       2042,
+		IsFile:     true,
+	}
+	a.ChildNodes[b.FileName] = b
+	c := &FileNode{
+		Id:         util.GenerateUUIDString(),
+		FileName:   "c",
+		ParentNode: a,
+		ChildNodes: map[string]*FileNode{},
+		Chunks:     nil,
+		Size:       0,
+		IsFile:     false,
+	}
+	a.ChildNodes[c.FileName] = c
+	return a
 }

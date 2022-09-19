@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,21 +50,6 @@ type FileNode struct {
 	IsDel          bool
 	UpdateNodeLock *sync.RWMutex
 	LastLockTime   time.Time
-}
-
-func (f *FileNode) String() string {
-	res := strings.Builder{}
-	if f.ParentNode == nil {
-		res.WriteString(fmt.Sprintf("%s %s %s %d %s %d %v %v %v %s\n",
-			f.Id, f.FileName, common.MinusOneString, len(f.ChildNodes), f.Chunks,
-			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(common.LogFileTimeFormat)))
-	} else {
-		res.WriteString(fmt.Sprintf("%s %s %s %d %s %d %v %v %v %s\n",
-			f.Id, f.FileName, f.ParentNode.Id, len(f.ChildNodes), f.Chunks,
-			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(common.LogFileTimeFormat)))
-	}
-
-	return res.String()
 }
 
 func CheckAndGetFileNode(path string) (*FileNode, error) {
@@ -274,4 +260,59 @@ func RenameFileNode(path string, newName string) (*FileNode, error) {
 		fileNode.DelTime = nil
 	}
 	return fileNode, nil
+}
+
+func (f *FileNode) String() string {
+	res := strings.Builder{}
+	childrenIds := make([]string, 0)
+	for _, n := range f.ChildNodes {
+		childrenIds = append(childrenIds, n.Id)
+	}
+	if f.ParentNode == nil {
+		res.WriteString(fmt.Sprintf("%s$%s$%s$%v$%s$%d$%v$%v$%v$%s\n",
+			f.Id, f.FileName, common.MinusOneString, childrenIds, f.Chunks,
+			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(common.LogFileTimeFormat)))
+	} else {
+		res.WriteString(fmt.Sprintf("%s$%s$%s$%v$%s$%d$%v$%v$%v$%s\n",
+			f.Id, f.FileName, f.ParentNode.Id, childrenIds, f.Chunks,
+			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(common.LogFileTimeFormat)))
+
+	}
+
+	return res.String()
+}
+
+// IsDeepEqualTo is used to compare two filenodes
+func (f *FileNode) IsDeepEqualTo(t *FileNode) bool {
+	arr1 := make([]*FileNode, 0)
+	arr2 := make([]*FileNode, 0)
+	f.add2Arr(&arr1)
+	t.add2Arr(&arr2)
+	if len(arr1) != len(arr2) {
+		return false
+	}
+	for i := 0; i < len(arr1); i++ {
+		s1 := arr1[i].String()
+		s2 := arr2[i].String()
+		if s1 != s2 {
+			return false
+		}
+	}
+	return true
+}
+
+func (f *FileNode) add2Arr(arr *[]*FileNode) {
+	if f == nil {
+		return
+	}
+	*arr = append(*arr, f)
+	// Guaranteed iteration order
+	children := make([]string, len(f.ChildNodes))
+	for key, _ := range f.ChildNodes {
+		children = append(children, key)
+	}
+	sort.Strings(children)
+	for _, child := range children {
+		f.ChildNodes[child].add2Arr(arr)
+	}
 }

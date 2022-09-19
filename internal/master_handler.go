@@ -29,8 +29,8 @@ type MasterHandler struct {
 //CreateMasterHandler 创建MasterHandler
 func CreateMasterHandler() {
 	config.InitConfig()
-	RootDeserialize(root, ReadRootLines())
-	Merge2Root(root, ReadLogLines(LogFileName))
+	root = RootDeserialize(ReadRootLines(common.DirectoryFileName))
+	Merge2Root(root, ReadLogLines(common.LogFileName))
 	// Connect Shadow master
 	addr := viper.GetString(common.SMAddr) + viper.GetString(common.SMPort)
 	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
