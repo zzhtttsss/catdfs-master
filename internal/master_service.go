@@ -137,3 +137,19 @@ func DoCheckAndMkdir(path string, dirName string) error {
 	}
 	return nil
 }
+
+func DoCheckAndMove(sourcePath string, targetPath string) error {
+	_, err := MoveFileNode(sourcePath, targetPath)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func DoCheckAndRemove(path string) error {
+	_, err := RemoveFileNode(path)
+	if err != nil {
+		return err
+	}
+	return nil
+}

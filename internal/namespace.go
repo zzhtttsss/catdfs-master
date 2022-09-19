@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -136,6 +135,10 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 	}
 	defer unlockAllMutex(stack, false)
 
+	if _, ok := fileNode.ChildNodes[filename]; ok {
+		return nil, fmt.Errorf("target path already has file with the same name, path : %s", path)
+	}
+
 	id := util.GenerateUUIDString()
 	newNode := &FileNode{
 		Id:             id,
@@ -161,6 +164,10 @@ func LockAndAddFileNode(path string, filename string, size int64, isFile bool) (
 	fileNode, stack, isExist := getAndLockByPath(path, false)
 	if !isExist {
 		return nil, nil, fmt.Errorf("path not exist, path : %s", path)
+	}
+
+	if _, ok := fileNode.ChildNodes[filename]; ok {
+		return nil, nil, fmt.Errorf("target path already has file with the same name, path : %s", path)
 	}
 
 	id := util.GenerateUUIDString()
@@ -221,7 +228,10 @@ func RemoveFileNode(path string) (*FileNode, error) {
 	}
 	defer unlockAllMutex(stack, false)
 
+	delete(fileNode.ParentNode.ChildNodes, fileNode.FileName)
 	fileNode.FileName = deleteFilePrefix + fileNode.FileName
+	fileNode.ParentNode.ChildNodes[fileNode.FileName] = fileNode
+
 	fileNode.IsDel = true
 	delTime := time.Now()
 	fileNode.DelTime = &(delTime)

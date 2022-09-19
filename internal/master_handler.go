@@ -25,6 +25,8 @@ type MasterHandler struct {
 	pb.UnimplementedHeartbeatServiceServer
 	pb.UnimplementedMasterAddServiceServer
 	pb.UnimplementedMasterMkdirServiceServer
+	pb.UnimplementedMasterMoveServiceServer
+	pb.UnimplementedMasterRemoveServiceServer
 }
 
 //CreateMasterHandler 创建MasterHandler
@@ -202,6 +204,42 @@ func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckA
 	return rep, nil
 }
 
+// CheckAndMove Called by client.
+// Check args and move directory or file to target path.
+func (handler *MasterHandler) CheckAndMove(ctx context.Context, args *pb.CheckAndMoveArgs) (*pb.CheckAndMoveReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for checking args and move directory or file to target path from client, sourcePath: %s, targetPath: %s", args.SourcePath, args.TargetPath)
+	err := DoCheckAndMove(args.SourcePath, args.TargetPath)
+	if err != nil {
+		logrus.Errorf("Fail to check args and move directory or file to target path, error code: %v, error detail: %s,", common.MasterCheckAndMoveFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndMoveFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.CheckAndMoveReply{}
+	logrus.WithContext(ctx).Infof("Success to check args and move directory or file to target path from client, sourcePath: %s, targetPath: %s", args.SourcePath, args.TargetPath)
+	return rep, nil
+}
+
+// CheckAndRemove Called by client.
+// Check args and remove directory or file at target path.
+func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.CheckAndRemoveArgs) (*pb.CheckAndRemoveReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for checking args and remove directory or file at target path from client, path: %s", args.Path)
+	err := DoCheckAndRemove(args.Path)
+	if err != nil {
+		logrus.Errorf("Fail to check args and remove directory or file at target path, error code: %v, error detail: %s,", common.MasterCheckAndRemoveFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndRemoveFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.CheckAndRemoveReply{}
+	logrus.WithContext(ctx).Infof("Success to check args and remove directory or file at target path from client, path: %s", args.Path)
+	return rep, nil
+}
+
 func (handler *MasterHandler) Server() {
 	listener, err := net.Listen(common.TCP, viper.GetString(common.MasterPort))
 	if err != nil {
@@ -213,6 +251,8 @@ func (handler *MasterHandler) Server() {
 	pb.RegisterHeartbeatServiceServer(server, handler)
 	pb.RegisterMasterAddServiceServer(server, handler)
 	pb.RegisterMasterMkdirServiceServer(server, handler)
+	pb.RegisterMasterMoveServiceServer(server, handler)
+	pb.RegisterMasterRemoveServiceServer(server, handler)
 	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
 	server.Serve(listener)
 }
