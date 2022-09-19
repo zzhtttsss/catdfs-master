@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"net"
 	"os"
@@ -16,7 +17,10 @@ import (
 
 var GlobalMasterHandler *MasterHandler
 
+const maxErrorCount = 3
+
 type MasterHandler struct {
+	ClientCon *grpc.ClientConn
 	pb.UnimplementedRegisterServiceServer
 	pb.UnimplementedHeartbeatServiceServer
 	pb.UnimplementedMasterAddServiceServer
@@ -25,7 +29,20 @@ type MasterHandler struct {
 //CreateMasterHandler 创建MasterHandler
 func CreateMasterHandler() {
 	config.InitConfig()
-	GlobalMasterHandler = &MasterHandler{}
+	root = RootDeserialize(ReadRootLines(common.DirectoryFileName))
+	Merge2Root(root, ReadLogLines(common.LogFileName))
+	// Connect Shadow master
+	addr := viper.GetString(common.SMAddr) + viper.GetString(common.SMPort)
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	errCount := 0
+	for err != nil && errCount < maxErrorCount {
+		conn, err = grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		errCount++
+	}
+	if errCount < maxErrorCount {
+		logrus.Info("Success Connect to Shadow master!")
+	}
+	GlobalMasterHandler = &MasterHandler{ClientCon: conn}
 }
 
 // Heartbeat 由Chunkserver调用该方法，维持心跳
@@ -64,8 +81,9 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 // CheckArgs4Add Called by client.
 // Check whether the path and file name entered by the user in the Add operation are legal.
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for checking add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
+	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
 	fileNodeId, chunkNum, err := DoCheckArgs4Add(args)
+	logrus.Infof("fileNodeId[%s] with chunkNum[%d]", fileNodeId, chunkNum)
 	if err != nil {
 		logrus.Errorf("Fail to check path and filename for add operation, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
@@ -74,9 +92,21 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 		})
 		return nil, details.Err()
 	}
+	client := pb.NewSendOperationServiceClient(handler.ClientCon)
+	op := OperationAdd(args.Path, true, args.FileName, args.Size)
+	_, err = client.SendOperation(context.Background(), op)
+	if err != nil {
+		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckArgs4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
 	rep := &pb.CheckArgs4AddReply{
 		FileNodeId: fileNodeId,
 		ChunkNum:   chunkNum,
+		Uuid:       op.Uuid,
 	}
 	return rep, nil
 
@@ -116,6 +146,19 @@ func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.Unlock
 		})
 		return nil, details.Err()
 	}
+	client := pb.NewSendOperationServiceClient(handler.ClientCon)
+	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
+		Uuid:     args.OperationUuid,
+		IsFinish: true,
+	})
+	if err != nil {
+		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterFinishOperationFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterGetDataNodes4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
 	rep := &pb.UnlockDic4AddReply{}
 	logrus.WithContext(ctx).Infof("Success to unlock FileNodes in the target path, FileNodeId: %s", args.FileNodeId)
 	return rep, nil
@@ -137,6 +180,7 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 	rep := &pb.ReleaseLease4AddReply{}
 	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
 	return rep, nil
+
 }
 
 func (handler *MasterHandler) Server() {

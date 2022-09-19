@@ -1,10 +1,12 @@
 package internal
 
 import (
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"strings"
 	"sync"
 	"testing"
+	"tinydfs-base/util"
 )
 
 type NodeTestCase struct {
@@ -23,23 +25,26 @@ func initRoot(path string) {
 	//TODO 最后一个是否为文件
 	n := len(pp)
 	nextNode := &FileNode{
+		Id:             util.GenerateUUIDString(),
 		FileName:       pp[n-1],
-		childNodes:     map[string]*FileNode{},
+		ChildNodes:     map[string]*FileNode{},
 		IsFile:         true,
-		updateNodeLock: &sync.RWMutex{},
+		UpdateNodeLock: &sync.RWMutex{},
 	}
 	for i := n - 2; i >= 1; i-- {
 		curNode := &FileNode{
+			Id:             util.GenerateUUIDString(),
 			FileName:       pp[i],
-			childNodes:     map[string]*FileNode{},
+			ChildNodes:     map[string]*FileNode{},
 			IsFile:         false,
-			updateNodeLock: &sync.RWMutex{},
+			UpdateNodeLock: &sync.RWMutex{},
 		}
-		curNode.childNodes[nextNode.FileName] = nextNode
-		nextNode.parentNode = curNode
+		curNode.ChildNodes[nextNode.FileName] = nextNode
+		nextNode.ParentNode = curNode
 		nextNode = curNode
 	}
-	root.childNodes[nextNode.FileName] = nextNode
+	root.ChildNodes[nextNode.FileName] = nextNode
+	nextNode.ParentNode = root
 }
 
 func TestGetAndLockByPath(t *testing.T) {
@@ -88,7 +93,7 @@ func TestGetAndLockByPath(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.childNodes = map[string]*FileNode{}
+				root.ChildNodes = map[string]*FileNode{}
 			}()
 			if c.initRootFunc != nil {
 				c.initRootFunc(c.path)
@@ -100,7 +105,7 @@ func TestGetAndLockByPath(t *testing.T) {
 			if s.Len() != 0 {
 				node, ok := s.Back().Value.(*FileNode)
 				assert.True(t, ok)
-				assert.Equal(t, c.expectCanReadLockOn, node.updateNodeLock.TryRLock())
+				assert.Equal(t, c.expectCanReadLockOn, node.UpdateNodeLock.TryRLock())
 				unlockAllMutex(s, c.isRead)
 			}
 		})
@@ -123,7 +128,7 @@ func TestCheckAndGetFileNode(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.childNodes = map[string]*FileNode{}
+				root.ChildNodes = map[string]*FileNode{}
 			}()
 			if c.initRootFunc != nil {
 				c.initRootFunc(c.path)
@@ -193,7 +198,7 @@ func TestRemoveFileNode(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.childNodes = map[string]*FileNode{}
+				root.ChildNodes = map[string]*FileNode{}
 			}()
 			if c.initRoot != nil {
 				c.initRoot(c.path)
@@ -230,7 +235,7 @@ func TestListFileNode(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.childNodes = map[string]*FileNode{}
+				root.ChildNodes = map[string]*FileNode{}
 			}()
 			if c.initRoot != nil {
 				c.initRoot(c.directory)
@@ -271,7 +276,7 @@ func TestRenameFileNode(t *testing.T) {
 	for name, c := range test {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
-				root.childNodes = map[string]*FileNode{}
+				root.ChildNodes = map[string]*FileNode{}
 			}()
 			if c.initRoot != nil {
 				c.initRoot(c.directory)
@@ -285,4 +290,64 @@ func TestRenameFileNode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFileNodeString(t *testing.T) {
+	test := map[string]*struct {
+		node         *FileNode
+		expectString string
+	}{
+		"RootA": {
+			node:         GetRootA(),
+			expectString: "",
+		},
+		"Root": {
+			node:         root,
+			expectString: "",
+		},
+	}
+	for name, c := range test {
+		t.Run(name, func(t *testing.T) {
+			if name == "RootA" {
+				fmt.Println(c.node.String())
+				for _, n := range c.node.ChildNodes {
+					fmt.Println(n.String())
+				}
+			}
+		})
+	}
+}
+
+// getRootA returns /b.txt /c directory
+func GetRootA() *FileNode {
+	a := &FileNode{
+		Id:         util.GenerateUUIDString(),
+		FileName:   "",
+		ParentNode: nil,
+		ChildNodes: map[string]*FileNode{},
+		Chunks:     nil,
+		Size:       0,
+		IsFile:     false,
+	}
+	b := &FileNode{
+		Id:         util.GenerateUUIDString(),
+		FileName:   "b.txt",
+		ParentNode: a,
+		ChildNodes: nil,
+		Chunks:     []string{"chunk1", "chunk2"},
+		Size:       2042,
+		IsFile:     true,
+	}
+	a.ChildNodes[b.FileName] = b
+	c := &FileNode{
+		Id:         util.GenerateUUIDString(),
+		FileName:   "c",
+		ParentNode: a,
+		ChildNodes: map[string]*FileNode{},
+		Chunks:     nil,
+		Size:       0,
+		IsFile:     false,
+	}
+	a.ChildNodes[c.FileName] = c
+	return a
 }

@@ -30,9 +30,15 @@
 FROM golang:1.18-alpine AS build
 WORKDIR /app
 ADD . /app
-EXPOSE 9099
 
-RUN CGO_ENABLED=0 GOOS=linux go build ./cmd/main.go
+# 以下两者仅存其一
+# m
+#EXPOSE 9099
+#RUN CGO_ENABLED=0 GOOS=linux go build ./cmd/main.go
+
+# sm
+EXPOSE 9100
+RUN CGO_ENABLED=0 GOOS=linux go build ./shadow_master/cmd/main.go
 
 
 ENTRYPOINT ["./main"]
