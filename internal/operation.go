@@ -353,7 +353,12 @@ func buildTree(cur *FileNode, nodeMap map[string]*FileNode) {
 	if cur == nil {
 		return
 	}
+	// id is the key of cur.ChildNodes which is uuid
+	ids := make([]string, 0)
 	for id, _ := range cur.ChildNodes {
+		ids = append(ids, id)
+	}
+	for _, id := range ids {
 		node := nodeMap[id]
 		delete(cur.ChildNodes, id)
 		cur.ChildNodes[node.FileName] = node
