@@ -33,8 +33,8 @@ type MasterHandler struct {
 func CreateMasterHandler() {
 	config.InitConfig()
 	rootMap := ReadRootLines(common.DirectoryFileName)
-	if rootMap != nil {
-		RootDeserialize(rootMap)
+	if rootMap != nil && len(rootMap) != 0 {
+		root = RootDeserialize(rootMap)
 	}
 	Merge2Root(root, ReadLogLines(common.LogFileName))
 	// Connect Shadow master
