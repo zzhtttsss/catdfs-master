@@ -27,6 +27,9 @@ type MasterHandler struct {
 	pb.UnimplementedMasterMkdirServiceServer
 	pb.UnimplementedMasterMoveServiceServer
 	pb.UnimplementedMasterRemoveServiceServer
+	pb.UnimplementedMasterRenameServiceServer
+	pb.UnimplementedMasterListServiceServer
+	pb.UnimplementedMasterStatServiceServer
 }
 
 //CreateMasterHandler 创建MasterHandler
@@ -326,6 +329,146 @@ func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.Check
 	return rep, nil
 }
 
+// CheckAndList Called by client.
+// Check args and ls the specified directory.
+func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAndListArgs) (*pb.CheckAndListReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for checking args and list the specified directory, path: %s", args.Path)
+	client := pb.NewSendOperationServiceClient(handler.ClientCon)
+	op := OperationList(args.Path)
+	_, err := client.SendOperation(context.Background(), op)
+	if err != nil {
+		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndListFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndListFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
+	infos, err := DoCheckAndList(args.Path)
+	if err != nil {
+		logrus.Errorf("Fail to check args and list the specified directory, error code: %v, error detail: %s,", common.MasterCheckAndRemoveFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndRemoveFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
+		Uuid:     op.Uuid,
+		IsFinish: true,
+	})
+	if err != nil {
+		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterCheckAndListFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndListFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
+	files := make([]*pb.FileInfo, len(infos))
+	for i := 0; i < len(infos); i++ {
+		files[i] = &pb.FileInfo{
+			FileName: infos[i].FileName,
+			IsFile:   infos[i].IsFile,
+		}
+	}
+	rep := &pb.CheckAndListReply{Files: files}
+	logrus.WithContext(ctx).Infof("Success to check args and list specified directory, path: %s", args.Path)
+	return rep, nil
+}
+
+// CheckAndStat Called by client.
+// Check args and return the specified file info.
+func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAndStatArgs) (*pb.CheckAndStatReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for checking args and get the specified file info, path: %s", args.Path)
+	client := pb.NewSendOperationServiceClient(handler.ClientCon)
+	op := OperationStat(args.Path)
+	_, err := client.SendOperation(context.Background(), op)
+	if err != nil {
+		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndStatFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
+	info, err := DoCheckAndStat(args.Path)
+	if err != nil {
+		logrus.Errorf("Fail to check args and get the specified file info, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndStatFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
+		Uuid:     op.Uuid,
+		IsFinish: true,
+	})
+	if err != nil {
+		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndStatFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
+	rep := &pb.CheckAndStatReply{
+		FileName: info.FileName,
+		IsFile:   info.IsFile,
+		Size:     info.Size,
+	}
+	logrus.WithContext(ctx).Infof("Success to check args and get the specified file info, path: %s", args.Path)
+	return rep, nil
+}
+
+// CheckAndRename Called by client.
+// Check args and rename the specified file to a new name.
+func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.CheckAndRenameArgs) (*pb.CheckAndRenameReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for checking args and rename the specified file to a new name, path: %s, new name: %s", args.Path, args.NewName)
+	client := pb.NewSendOperationServiceClient(handler.ClientCon)
+	op := OperationRename(args.Path, args.NewName)
+	_, err := client.SendOperation(context.Background(), op)
+	if err != nil {
+		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndRenameFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndRenameFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
+	err = DoCheckAndRename(args.Path, args.NewName)
+	if err != nil {
+		logrus.Errorf("Fail to check args and rename the specified file to a new name, error code: %v, error detail: %s,", common.MasterCheckAndRenameFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndRenameFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
+		Uuid:     op.Uuid,
+		IsFinish: true,
+	})
+	if err != nil {
+		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterCheckAndRenameFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndRenameFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
+	rep := &pb.CheckAndRenameReply{}
+	logrus.WithContext(ctx).Infof("Success to check args and rename the specified file to a new name, path: %s", args.Path)
+	return rep, nil
+}
+
 func (handler *MasterHandler) Server() {
 	listener, err := net.Listen(common.TCP, viper.GetString(common.MasterPort))
 	if err != nil {
@@ -339,6 +482,9 @@ func (handler *MasterHandler) Server() {
 	pb.RegisterMasterMkdirServiceServer(server, handler)
 	pb.RegisterMasterMoveServiceServer(server, handler)
 	pb.RegisterMasterRemoveServiceServer(server, handler)
+	pb.RegisterMasterListServiceServer(server, handler)
+	pb.RegisterMasterRenameServiceServer(server, handler)
+	pb.RegisterMasterStatServiceServer(server, handler)
 	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
 	server.Serve(listener)
 }

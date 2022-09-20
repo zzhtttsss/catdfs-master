@@ -272,6 +272,15 @@ func RenameFileNode(path string, newName string) (*FileNode, error) {
 	return fileNode, nil
 }
 
+func StatFileNode(path string) (*FileNode, error) {
+	fileNode, stack, isExist := getAndLockByPath(path, true)
+	if !isExist {
+		return nil, fmt.Errorf("path not exist, path : %s", path)
+	}
+	defer unlockAllMutex(stack, true)
+	return fileNode, nil
+}
+
 func (f *FileNode) String() string {
 	res := strings.Builder{}
 	childrenIds := make([]string, 0)
