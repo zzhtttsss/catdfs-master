@@ -84,11 +84,12 @@ func OperationList(des string) *pb.OperationArgs {
 	}
 }
 
-func OperationMkdir(des string) *pb.OperationArgs {
+func OperationMkdir(des string, filename string) *pb.OperationArgs {
 	return &pb.OperationArgs{
-		Uuid: util.GenerateUUIDString(),
-		Type: Operation_Mkdir,
-		Des:  des,
+		Uuid:     util.GenerateUUIDString(),
+		Type:     Operation_Mkdir,
+		Des:      des,
+		FileName: filename,
 	}
 }
 
@@ -131,6 +132,9 @@ func (f *FileNode) getFileNodeByPath(path string) *FileNode {
 	currentNode := f
 	path = strings.Trim(path, pathSplitString)
 	fileNames := strings.Split(path, pathSplitString)
+	if path == f.FileName {
+		return f
+	}
 	for _, name := range fileNames {
 		nextNode, _ := currentNode.ChildNodes[name]
 		currentNode = nextNode
@@ -193,6 +197,12 @@ func Mkdir2Root(root *FileNode, op *pb.OperationArgs) {
 		ChildNodes:     map[string]*FileNode{},
 		DelTime:        nil,
 		UpdateNodeLock: &sync.RWMutex{},
+	}
+	if parent == nil {
+		logrus.Infof("parent is nil")
+	}
+	if parent.ChildNodes == nil {
+		logrus.Infof("child of parent is nil")
 	}
 	parent.ChildNodes[newNode.FileName] = newNode
 }
