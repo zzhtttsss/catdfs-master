@@ -9,7 +9,7 @@ shadowMaster:
   addr: "172.18.0.12"
 #  addr: "127.0.0.1"
   port: ":9100"
-  fsimageFlushTime: 30    # 每隔 3600s 进行一次合并落盘
+  fsimageFlushTime: 300    # 每隔 3600s 进行一次合并落盘
 
 # chunk server 配置
 chunk:

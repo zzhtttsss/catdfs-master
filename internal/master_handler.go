@@ -37,6 +37,7 @@ func CreateMasterHandler() {
 	config.InitConfig()
 	rootMap := ReadRootLines(common.DirectoryFileName)
 	if rootMap != nil && len(rootMap) != 0 {
+		logrus.Println("Root Deserialize")
 		root = RootDeserialize(rootMap)
 	}
 	Merge2Root(root, ReadLogLines(common.LogFileName))
