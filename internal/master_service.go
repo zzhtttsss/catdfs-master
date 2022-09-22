@@ -168,3 +168,14 @@ func DoCheckAndRename(path, newName string) error {
 	}
 	return nil
 }
+
+func FileNode2FileInfo(nodes []*FileNode) []*pb.FileInfo {
+	files := make([]*pb.FileInfo, len(nodes))
+	for i := 0; i < len(nodes); i++ {
+		files[i] = &pb.FileInfo{
+			FileName: nodes[i].FileName,
+			IsFile:   nodes[i].IsFile,
+		}
+	}
+	return files
+}

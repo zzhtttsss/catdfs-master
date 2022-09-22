@@ -367,15 +367,7 @@ func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAn
 		})
 		return nil, details.Err()
 	}
-
-	files := make([]*pb.FileInfo, len(infos))
-	for i := 0; i < len(infos); i++ {
-		files[i] = &pb.FileInfo{
-			FileName: infos[i].FileName,
-			IsFile:   infos[i].IsFile,
-		}
-	}
-	rep := &pb.CheckAndListReply{Files: files}
+	rep := &pb.CheckAndListReply{Files: FileNode2FileInfo(infos)}
 	logrus.WithContext(ctx).Infof("Success to check args and list specified directory, path: %s", args.Path)
 	return rep, nil
 }
