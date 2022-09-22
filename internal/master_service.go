@@ -152,3 +152,30 @@ func DoCheckAndRemove(path string) error {
 	}
 	return nil
 }
+
+func DoCheckAndList(path string) ([]*FileNode, error) {
+	return ListFileNode(path)
+}
+
+func DoCheckAndStat(path string) (*FileNode, error) {
+	return StatFileNode(path)
+}
+
+func DoCheckAndRename(path, newName string) error {
+	_, err := RenameFileNode(path, newName)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func FileNode2FileInfo(nodes []*FileNode) []*pb.FileInfo {
+	files := make([]*pb.FileInfo, len(nodes))
+	for i := 0; i < len(nodes); i++ {
+		files[i] = &pb.FileInfo{
+			FileName: nodes[i].FileName,
+			IsFile:   nodes[i].IsFile,
+		}
+	}
+	return files
+}

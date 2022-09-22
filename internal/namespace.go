@@ -272,6 +272,10 @@ func RenameFileNode(path string, newName string) (*FileNode, error) {
 	return fileNode, nil
 }
 
+func StatFileNode(path string) (*FileNode, error) {
+	return CheckAndGetFileNode(path)
+}
+
 func (f *FileNode) String() string {
 	res := strings.Builder{}
 	childrenIds := make([]string, 0)
