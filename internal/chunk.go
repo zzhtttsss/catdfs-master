@@ -9,6 +9,7 @@ var (
 )
 
 type Chunk struct {
+	// ChunkId = FileNodeId+_+ChunkNum
 	Id string
 	// id of all DataNode storing this Chunk.
 	dataNodes   []string
