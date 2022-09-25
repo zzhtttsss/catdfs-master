@@ -2,6 +2,8 @@ package internal
 
 import (
 	"context"
+	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/raft"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
@@ -10,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 	"net"
 	"os"
+
 	"tinydfs-base/common"
 	"tinydfs-base/config"
 	"tinydfs-base/protocol/pb"
@@ -31,6 +34,10 @@ type MasterHandler struct {
 
 //CreateMasterHandler 创建MasterHandler
 func CreateMasterHandler() {
+	raftConfig := raft.DefaultConfig()
+	raftConfig.LocalID = raft.ServerID("")
+	raftConfig.Logger = hclog.L()
+	//raft.NewRaft()
 	config.InitConfig()
 	rootMap := ReadRootLines(common.DirectoryFileName)
 	if rootMap != nil {

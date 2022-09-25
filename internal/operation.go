@@ -5,6 +5,7 @@ import (
 	"container/list"
 	"github.com/sirupsen/logrus"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +38,60 @@ const (
 	Operation_Stat   = "Stat"
 	Operation_Finish = "Finish"
 )
+
+var (
+	OperationTypes = make(map[string]reflect.Type)
+)
+
+type Operation interface {
+	Apply() error
+
+	Merge2root()
+
+	Conv2Proto() *pb.OperationArgs
+}
+
+type MkdirOperation struct {
+	Id       string `json:"id"`
+	Des      string `json:"des"`
+	FileName string `json:"file_name"`
+	Type     string `json:"type"`
+}
+
+func (ap MkdirOperation) Apply() error {
+	err := DoCheckAndMkdir(ap.Des, ap.FileName)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (ap MkdirOperation) Merge2root() {
+	parent := root.getFileNodeByPath(ap.Des)
+	newNode := &FileNode{
+		Id:             ap.Id,
+		FileName:       ap.FileName,
+		ParentNode:     parent,
+		Size:           common.DirSize,
+		IsFile:         false,
+		IsDel:          false,
+		UpdateNodeLock: &sync.RWMutex{},
+	}
+	newNode.ChildNodes = make(map[string]*FileNode)
+	parent.ChildNodes[newNode.FileName] = newNode
+}
+
+func (ap MkdirOperation) Conv2Proto() *pb.OperationArgs {
+	return &pb.OperationArgs{
+		Uuid:     ap.Id,
+		Type:     Operation_Mkdir,
+		Des:      ap.Des,
+		IsFile:   false,
+		FileName: ap.FileName,
+		Size:     common.DirSize,
+		IsFinish: false,
+	}
+}
 
 func OperationAdd(des string, isFile bool, fileName string, size int64) *pb.OperationArgs {
 	return &pb.OperationArgs{

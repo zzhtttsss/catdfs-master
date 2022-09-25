@@ -1,13 +1,18 @@
 package internal
 
 import (
+	"container/list"
 	"context"
+	"encoding/json"
 	"fmt"
 	set "github.com/deckarep/golang-set"
 	"github.com/google/uuid"
+	"github.com/hashicorp/raft"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc/peer"
+	"io"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +23,67 @@ import (
 const (
 	isFile4File = true
 )
+
+type MasterService struct {
+}
+
+func (ms MasterService) Apply(l *raft.Log) interface{} {
+	operation := ConvBytes2Operation(l.Data)
+	err := operation.Apply()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func ConvBytes2Operation(data []byte) Operation {
+	dataString := string(data)
+	strings.Trim(dataString, "}")
+	dataStringArray := strings.Split(dataString, ":")
+	opType := strings.Trim(dataStringArray[len(dataStringArray)-1], "\"")
+
+	operationValue := reflect.New(OperationTypes[opType])
+	json.Unmarshal(data, operationValue)
+	operation := operationValue.Interface().(Operation)
+	return operation
+}
+
+func (ms MasterService) Snapshot() (raft.FSMSnapshot, error) {
+	// Make sure that any future calls to f.Apply() don't change the snapshot.
+	return &snapshot{}, nil
+}
+
+func (ms MasterService) Restore(r io.ReadCloser) error {
+	return r.Close()
+}
+
+type snapshot struct {
+}
+
+func (s *snapshot) Persist(sink raft.SnapshotSink) error {
+	queue := list.New()
+	queue.PushBack(root)
+	for queue.Len() != 0 {
+		cur := queue.Front()
+		queue.Remove(cur)
+		node, ok := cur.Value.(*FileNode)
+		if !ok {
+			logrus.Warnf("Element2FileNode failed\n")
+		}
+		_, err := sink.Write([]byte(node.String()))
+		if err != nil {
+			logrus.Errorf("Write String failed.Error Detail %s\n", err)
+		}
+		for _, child := range node.ChildNodes {
+			queue.PushBack(child)
+		}
+	}
+	return sink.Close()
+}
+
+func (s *snapshot) Release() {
+
+}
 
 func DoRegister(ctx context.Context) (string, error) {
 	var (
