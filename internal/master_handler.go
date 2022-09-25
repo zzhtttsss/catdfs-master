@@ -30,6 +30,7 @@ type MasterHandler struct {
 	pb.UnimplementedMasterRenameServiceServer
 	pb.UnimplementedMasterListServiceServer
 	pb.UnimplementedMasterStatServiceServer
+	pb.UnimplementedMasterGetServiceServer
 }
 
 //CreateMasterHandler 创建MasterHandler
@@ -121,6 +122,10 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 		Uuid:       op.Uuid,
 	}
 	return rep, nil
+
+}
+
+func (handler *MasterHandler) CheckAndGet() {
 
 }
 
