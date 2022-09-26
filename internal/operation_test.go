@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"io"
 	"os"
 	"sync"
 	"testing"
@@ -60,7 +61,7 @@ func TestRootDeserialize(t *testing.T) {
 	assert.True(t, rootA.IsDeepEqualTo(rootB))
 }
 
-func TestName(t *testing.T) {
+func TestWrite(t *testing.T) {
 	file, err := os.OpenFile("write.txt", os.O_CREATE|os.O_WRONLY, 0755)
 	if err != nil {
 		fmt.Println(err)
@@ -87,4 +88,17 @@ func TestName(t *testing.T) {
 	}
 	wg.Wait()
 	fmt.Println("Done")
+}
+
+func TestRead(t *testing.T) {
+	file, _ := os.Open("write.txt")
+	for i := 0; i < 7; i++ {
+		bytes := make([]byte, 119)
+		n, err := file.Read(bytes)
+		if err == io.EOF {
+			fmt.Println(err)
+		}
+		fmt.Println(string(bytes[:n]))
+	}
+
 }
