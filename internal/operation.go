@@ -43,6 +43,10 @@ var (
 	OperationTypes = make(map[string]reflect.Type)
 )
 
+func init() {
+	OperationTypes[Operation_Mkdir] = reflect.TypeOf(MkdirOperation{})
+}
+
 type Operation interface {
 	Apply() error
 

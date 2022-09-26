@@ -24,10 +24,10 @@ const (
 	isFile4File = true
 )
 
-type MasterService struct {
+type MasterFSM struct {
 }
 
-func (ms MasterService) Apply(l *raft.Log) interface{} {
+func (ms MasterFSM) Apply(l *raft.Log) interface{} {
 	operation := ConvBytes2Operation(l.Data)
 	err := operation.Apply()
 	if err != nil {
@@ -48,12 +48,12 @@ func ConvBytes2Operation(data []byte) Operation {
 	return operation
 }
 
-func (ms MasterService) Snapshot() (raft.FSMSnapshot, error) {
+func (ms MasterFSM) Snapshot() (raft.FSMSnapshot, error) {
 	// Make sure that any future calls to f.Apply() don't change the snapshot.
 	return &snapshot{}, nil
 }
 
-func (ms MasterService) Restore(r io.ReadCloser) error {
+func (ms MasterFSM) Restore(r io.ReadCloser) error {
 	return r.Close()
 }
 
