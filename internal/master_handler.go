@@ -251,6 +251,15 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 
 }
 
+// ReleaseLease4Get Called by client.
+// Release the lease of a chunk.
+func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.ReleaseLease4GetArgs) (*pb.ReleaseLease4GetReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
+	rep := &pb.ReleaseLease4GetReply{}
+	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
+	return rep, nil
+}
+
 // CheckAndMkdir Called by client.
 // Check args and make directory at target path.
 func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckAndMkDirArgs) (*pb.CheckAndMkDirReply, error) {
@@ -534,6 +543,7 @@ func (handler *MasterHandler) Server() {
 	pb.RegisterMasterListServiceServer(server, handler)
 	pb.RegisterMasterRenameServiceServer(server, handler)
 	pb.RegisterMasterStatServiceServer(server, handler)
+	pb.RegisterMasterGetServiceServer(server, handler)
 	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
 	server.Serve(listener)
 }
