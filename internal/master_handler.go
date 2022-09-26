@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/raft"
@@ -37,6 +38,7 @@ const (
 	etcdEndPoint = "172.18.0.20:2379"
 	etcdKey      = "leader-address"
 	tcp          = "tcp"
+	masterPort   = "9099"
 )
 
 type MasterHandler struct {
@@ -140,7 +142,10 @@ func (handler *MasterHandler) initRaft() error {
 	logrus.Infof("third")
 	ctx := context.Background()
 	kv := clientv3.NewKV(GlobalMasterHandler.EtcdClient)
-	getResp, _ := kv.Get(ctx, etcdKey)
+	getResp, err := kv.Get(ctx, etcdKey)
+	if err != nil {
+		logrus.Errorf("fail to get kv when init")
+	}
 
 	if len(getResp.Kvs) == 0 {
 		configuration := raft.Configuration{
@@ -166,21 +171,27 @@ func (handler *MasterHandler) initRaft() error {
 func (handler *MasterHandler) join2Cluster(args *pb.Join2ClusterArgs) (*pb.Join2ClusterReply, error) {
 	ctx := context.Background()
 	kv := clientv3.NewKV(GlobalMasterHandler.EtcdClient)
-	getResp, _ := kv.Get(ctx, etcdKey)
+	getResp, err := kv.Get(ctx, etcdKey)
+	if err != nil {
+		logrus.Errorf("fail to get kv when join cluster")
+	}
 	addr := string(getResp.Kvs[0].Value)
+	addr = strings.Split(addr, common.AddressDelimiter)[0] + common.AddressDelimiter + masterPort
+	logrus.Infof("leader address : %s", addr)
 	conn, _ := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	client := pb.NewRaftServiceClient(conn)
 	reply, err := client.Join2Cluster(ctx, args)
 	if err != nil {
-		logrus.Errorf("ewew")
+		logrus.Errorf("fail to join cluster, error detail : %s", err.Error())
 	}
 	return reply, err
 }
 
 // Join2Cluster 由Chunkserver调用该方法，将对应DataNode注册到本NameNode上
 func (handler *MasterHandler) Join2Cluster(ctx context.Context, args *pb.Join2ClusterArgs) (*pb.Join2ClusterReply, error) {
+	logrus.Info("get request")
 	p, _ := peer.FromContext(ctx)
-	address := strings.Split(p.Addr.String(), ":")[0]
+	address := strings.Split(p.Addr.String(), common.AddressDelimiter)[0]
 	rAddress := address + common.AddressDelimiter + raftPort
 	logrus.Infof("get request to join cluster, address : %s", rAddress)
 	cf := handler.Raft.GetConfiguration()
@@ -213,7 +224,10 @@ func monitorCluster() {
 		case isLeader := <-GlobalMasterHandler.MonitorChan:
 			if isLeader {
 				kv := clientv3.NewKV(GlobalMasterHandler.EtcdClient)
-				_, _ = kv.Put(context.Background(), etcdKey, GlobalMasterHandler.raftAddress)
+				_, err := kv.Put(context.Background(), etcdKey, GlobalMasterHandler.raftAddress)
+				if err != nil {
+					logrus.Errorf("fail to put kv when leader change")
+				}
 				logrus.Infof("become leader, change etcd leader infomation")
 			} else {
 				logrus.Infof("become follower")
@@ -384,10 +398,14 @@ func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckA
 		FileName: args.DirName,
 		Type:     Operation_Mkdir,
 	}
-
-	err := operation.Apply()
-	//err = DoCheckAndMkdir(args.Path, args.DirName)
+	operationBytes, err := json.Marshal(operation)
 	if err != nil {
+		return nil, err
+	}
+
+	applyFuture := handler.Raft.Apply(operationBytes, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
+		logrus.Errorf("fail to apply, error detail : %s", err.Error())
 		logrus.Errorf("Fail to check args and make directory at target path, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndMkdirFailed,
@@ -395,6 +413,15 @@ func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckA
 		})
 		return nil, details.Err()
 	}
+	//err = DoCheckAndMkdir(args.Path, args.DirName)
+	//if err != nil {
+	//	logrus.Errorf("Fail to check args and make directory at target path, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
+	//	details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+	//		Code: common.MasterCheckAndMkdirFailed,
+	//		Msg:  err.Error(),
+	//	})
+	//	return nil, details.Err()
+	//}
 
 	//client = pb.NewSendOperationServiceClient(handler.ClientCon)
 	//_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{

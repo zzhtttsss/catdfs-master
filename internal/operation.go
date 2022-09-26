@@ -63,10 +63,12 @@ type MkdirOperation struct {
 }
 
 func (ap MkdirOperation) Apply() error {
+	logrus.Infof("start to apply")
 	err := DoCheckAndMkdir(ap.Des, ap.FileName)
 	if err != nil {
 		return err
 	}
+	logrus.Infof("finish apply")
 	return nil
 }
 

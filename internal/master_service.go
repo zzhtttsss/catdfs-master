@@ -38,10 +38,11 @@ func (ms MasterFSM) Apply(l *raft.Log) interface{} {
 
 func ConvBytes2Operation(data []byte) Operation {
 	dataString := string(data)
-	strings.Trim(dataString, "}")
+	logrus.Infof("data : %s", dataString)
+	dataString = strings.Trim(dataString, "}")
 	dataStringArray := strings.Split(dataString, ":")
 	opType := strings.Trim(dataStringArray[len(dataStringArray)-1], "\"")
-
+	logrus.Infof("operation type is %s", opType)
 	operationValue := reflect.New(OperationTypes[opType])
 	json.Unmarshal(data, operationValue)
 	operation := operationValue.Interface().(Operation)
@@ -200,6 +201,7 @@ func DoCheckAndMkdir(path string, dirName string) error {
 	if err != nil {
 		return err
 	}
+	logrus.Infof("success to mkdir")
 	return nil
 }
 
