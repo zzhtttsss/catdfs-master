@@ -29,6 +29,7 @@ const (
 
 const (
 	Operation_Add    = "Add"
+	Operation_Get    = "Get"
 	Operation_Remove = "Remove"
 	Operation_Move   = "Move"
 	Operation_Rename = "Rename"
@@ -55,6 +56,14 @@ func OperationRemove(des string) *pb.OperationArgs {
 		Uuid: util.GenerateUUIDString(),
 		Type: Operation_Remove,
 		Des:  des,
+	}
+}
+
+func OperationGet(path string) *pb.OperationArgs {
+	return &pb.OperationArgs{
+		Uuid: util.GenerateUUIDString(),
+		Type: Operation_Get,
+		Des:  path,
 	}
 }
 

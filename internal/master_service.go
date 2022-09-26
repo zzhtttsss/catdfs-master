@@ -112,6 +112,27 @@ func DoGetDataNodes4Add(fileNodeId string, chunkIndex int32) ([]string, string, 
 	return dataNodeAddrs, primaryNode.Address, nil
 }
 
+func DoCheckAndGet(path string) (*FileNode, error) {
+	fileNode, err := CheckAndGetFileNode(path)
+	if err != nil {
+		return nil, err
+	}
+	return fileNode, nil
+}
+
+func DoGetDataNodes4Get(fileNodeId string, chunkIndex int32) ([]string, []string, error) {
+	chunkId := fileNodeId + common.ChunkIdDelimiter + strconv.FormatInt(int64(chunkIndex), 10)
+	chunk := GetChunk(chunkId)
+	dataNodeIds := make([]string, len(chunk.dataNodes))
+	dataNodeAddrs := make([]string, len(chunk.dataNodes))
+	for i, nodeId := range chunk.dataNodes {
+		dataNode := GetDataNode(nodeId)
+		dataNodeIds[i] = dataNode.Id
+		dataNodeAddrs[i] = dataNode.Address
+	}
+	return dataNodeIds, dataNodeAddrs, nil
+}
+
 func DoUnlockDic4Add(fileNodeId string, isRead bool) error {
 	err := UnlockFileNodesById(fileNodeId, isRead)
 	if err != nil {

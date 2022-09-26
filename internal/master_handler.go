@@ -125,8 +125,37 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 
 }
 
-func (handler *MasterHandler) CheckAndGet() {
+// CheckAndGet called by client
+// check get args and get the filenode according to path
+func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAndGetArgs) (*pb.CheckAndGetReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for getting fileNode for path, Path: %s", args.Path)
+	client := pb.NewSendOperationServiceClient(handler.ClientCon)
+	op := OperationGet(args.Path)
+	_, err := client.SendOperation(context.Background(), op)
+	if err != nil {
+		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndGetFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndGetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
 
+	fileNode, err := DoCheckAndGet(args.Path)
+	if err != nil {
+		logrus.Errorf("Fail to get dataNode for get operation, error code: %v, error detail: %s", common.MasterCheckAndGetFailed, err)
+		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndGetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.CheckAndGetReply{
+		FileNodeId:  fileNode.Id,
+		ChunkNum:    int32(len(fileNode.Chunks)),
+		OperationId: op.Uuid,
+	}
+	return rep, nil
 }
 
 // GetDataNodes4Add Called by client.
@@ -147,6 +176,28 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 		PrimaryNode: primaryNode,
 	}
 	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk for add operation, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
+	return rep, nil
+}
+
+// GetDataNodes4Get called by client
+// GetDataNodes4Get find the dataNodes for the specified chunkId
+func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.GetDataNodes4GetArgs) (*pb.GetDataNodes4GetReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for getting data node, FileNodeId: %s", args.FileNodeId)
+	dataNodeIds, dataNodeAddrs, err := DoGetDataNodes4Get(args.FileNodeId, args.ChunkIndex)
+	if err != nil {
+		logrus.Errorf("Fail to get dataNodes for get operation, error code: %v, error detail: %s,", common.MasterGetDataNodes4GetFailed, err.Error())
+		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterGetDataNodes4GetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.GetDataNodes4GetReply{
+		DataNodeIds:   dataNodeIds,
+		DataNodeAddrs: dataNodeAddrs,
+		ChunkIndex:    args.ChunkIndex,
+	}
+	logrus.WithContext(ctx).Infof("Success to get dataNodes for get operation, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
 	return rep, nil
 }
 
