@@ -255,6 +255,15 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 // Release the lease of a chunk.
 func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.ReleaseLease4GetArgs) (*pb.ReleaseLease4GetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
+	err := DoReleaseLease4Get(args.ChunkId)
+	if err != nil {
+		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4GetFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterReleaseLease4GetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
 	rep := &pb.ReleaseLease4GetReply{}
 	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
 	return rep, nil

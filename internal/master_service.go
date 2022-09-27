@@ -150,6 +150,15 @@ func DoReleaseLease4Add(chunkId string) error {
 	return nil
 }
 
+func DoReleaseLease4Get(chunkId string) error {
+	chunk := GetChunk(chunkId)
+	err := ReleaseLease(chunk.primaryNode, chunkId)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func DoCheckAndMkdir(path string, dirName string) error {
 	_, err := AddFileNode(path, dirName, common.DirSize, false)
 	if err != nil {
