@@ -60,6 +60,6 @@ require (
 //replace github.com/coreos/bbolt => go.etcd.io/bbolt v1.3.6
 //replace github.com/coreos/etcd => go.etcd.io/etcd/v3 v3.5.0
 
-replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20220926115327-4c6d143c7bc5
+//replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20220926115327-4c6d143c7bc5
 
-//replace tinydfs-base => ../tinydfs-base
+replace tinydfs-base => ../tinydfs-base

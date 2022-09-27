@@ -27,6 +27,7 @@ const (
 type MasterFSM struct {
 }
 
+// Apply This function will call Apply function of operation, changes to metadata will be made in that function
 func (ms MasterFSM) Apply(l *raft.Log) interface{} {
 	operation := ConvBytes2Operation(l.Data)
 	err := operation.Apply()
@@ -36,13 +37,14 @@ func (ms MasterFSM) Apply(l *raft.Log) interface{} {
 	return nil
 }
 
+// ConvBytes2Operation Use reflect to restore operation from data
 func ConvBytes2Operation(data []byte) Operation {
+	// get type of operation from data
 	dataString := string(data)
-	logrus.Infof("data : %s", dataString)
 	dataString = strings.Trim(dataString, "}")
 	dataStringArray := strings.Split(dataString, ":")
 	opType := strings.Trim(dataStringArray[len(dataStringArray)-1], "\"")
-	logrus.Infof("operation type is %s", opType)
+	// the operationValue is already a pointer
 	operationValue := reflect.New(OperationTypes[opType])
 	json.Unmarshal(data, operationValue)
 	operation := operationValue.Interface().(Operation)
@@ -50,17 +52,18 @@ func ConvBytes2Operation(data []byte) Operation {
 }
 
 func (ms MasterFSM) Snapshot() (raft.FSMSnapshot, error) {
-	// Make sure that any future calls to f.Apply() don't change the snapshot.
 	return &snapshot{}, nil
 }
 
 func (ms MasterFSM) Restore(r io.ReadCloser) error {
+	logrus.Infof("restore when start")
 	return r.Close()
 }
 
 type snapshot struct {
 }
 
+// Persist Take a snapshot of current metadata.
 func (s *snapshot) Persist(sink raft.SnapshotSink) error {
 	queue := list.New()
 	queue.PushBack(root)
@@ -69,11 +72,11 @@ func (s *snapshot) Persist(sink raft.SnapshotSink) error {
 		queue.Remove(cur)
 		node, ok := cur.Value.(*FileNode)
 		if !ok {
-			logrus.Warnf("Element2FileNode failed\n")
+			logrus.Warnf("Fail to convert element to FileNode")
 		}
 		_, err := sink.Write([]byte(node.String()))
 		if err != nil {
-			logrus.Errorf("Write String failed.Error Detail %s\n", err)
+			logrus.Errorf("Fail to write string, error detail %s", err.Error())
 		}
 		for _, child := range node.ChildNodes {
 			queue.PushBack(child)
