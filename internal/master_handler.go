@@ -38,11 +38,12 @@ type MasterHandler struct {
 	pb.UnimplementedMasterMoveServiceServer
 	pb.UnimplementedMasterRemoveServiceServer
 	pb.UnimplementedRaftServiceServer
-	FSM         *MasterFSM
-	Raft        *raft.Raft
-	MonitorChan chan bool
-	EtcdClient  *clientv3.Client
-	raftAddress string
+	FSM                   *MasterFSM
+	Raft                  *raft.Raft
+	FollowerStateObserver *raft.Observer
+	MonitorChan           chan bool
+	EtcdClient            *clientv3.Client
+	raftAddress           string
 }
 
 // CreateMasterHandler Create a global MasterHandler which will handle all incoming requests.
@@ -53,7 +54,7 @@ func CreateMasterHandler() {
 		FSM: &MasterFSM{},
 	}
 	GlobalMasterHandler.EtcdClient, err = clientv3.New(clientv3.Config{
-		Endpoints:   []string{common.EtcdEndPoint},
+		Endpoints:   []string{viper.GetString(common.EtcdEndPoint)},
 		DialTimeout: 5 * time.Second,
 	})
 	err = GlobalMasterHandler.initRaft()
@@ -66,6 +67,7 @@ func CreateMasterHandler() {
 func (handler *MasterHandler) initRaft() error {
 	raftConfig := raft.DefaultConfig()
 	raftConfig.SnapshotInterval = 20 * time.Second
+	raftConfig.SnapshotThreshold = 128
 	raftConfig.Logger = hclog.L()
 
 	localIP, err := util.GetLocalIP()
@@ -77,7 +79,7 @@ func (handler *MasterHandler) initRaft() error {
 
 	handler.MonitorChan = make(chan bool, 1)
 	raftConfig.NotifyCh = handler.MonitorChan
-	go monitorCluster()
+	go handler.monitorCluster()
 
 	addr, err := net.ResolveTCPAddr(common.TCP, handler.raftAddress)
 	if err != nil {
@@ -114,13 +116,26 @@ func (handler *MasterHandler) initRaft() error {
 		logrus.Errorf("Fail to create raft node, error detail: %s", err.Error())
 		return err
 	}
-
 	handler.Raft = r
 	err = handler.BootstrapOrJoinCluster()
 	if err != nil {
+		logrus.Errorf("Fail to bootstrap or join, error detail: %s", err.Error())
 		return err
 	}
 	return nil
+}
+
+func getFollowerStateObserver() *raft.Observer {
+	observerChan := make(chan raft.Observation)
+	filterFn := func(o *raft.Observation) bool {
+		ob, ok := o.Data.(raft.FailedHeartbeatObservation)
+		if ok {
+			GlobalMasterHandler.Raft.RemoveServer(ob.PeerID, 0, 0)
+			logrus.Infof("Remove a dead follower, address: %s", string(ob.PeerID))
+		}
+		return ok
+	}
+	return raft.NewObserver(observerChan, false, filterFn)
 }
 
 // BootstrapOrJoinCluster Bootstrap cluster when there is no cluster, otherwise join cluster.
@@ -132,8 +147,8 @@ func (handler *MasterHandler) BootstrapOrJoinCluster() error {
 		logrus.Errorf("Fail to get kv when init, error detail: %s", err.Error())
 		return err
 	}
-
 	if len(getResp.Kvs) == 0 {
+		logrus.Infof("No cluster, start to bootstrap cluster")
 		configuration := raft.Configuration{
 			Servers: []raft.Server{
 				{
@@ -142,14 +157,17 @@ func (handler *MasterHandler) BootstrapOrJoinCluster() error {
 				},
 			},
 		}
-		handler.Raft.BootstrapCluster(configuration)
+		f := handler.Raft.BootstrapCluster(configuration)
+		if err := f.Error(); err != nil {
+			logrus.Errorf("Fail to bootstrap, error detail: %s", err.Error())
+		}
 		_, err = kv.Put(ctx, common.LeaderAddressKey, handler.raftAddress)
 		if err != nil {
 			logrus.Errorf("Fail to get kv when init, error detail: %s", err.Error())
-
 			//todo 失败重试
 		}
 	} else {
+		logrus.Infof("Already have cluster, start to join cluster")
 		_, err := handler.joinCluster(&pb.JoinClusterArgs{})
 		if err != nil {
 			logrus.Errorf("Fail to join cluster, error detail: %s", err.Error())
@@ -169,7 +187,7 @@ func (handler *MasterHandler) joinCluster(args *pb.JoinClusterArgs) (*pb.JoinClu
 		logrus.Errorf("Fail to get key-value when join cluster, error deatil: %s", err.Error())
 	}
 	addr := string(getResp.Kvs[0].Value)
-	addr = strings.Split(addr, common.AddressDelimiter)[0] + common.AddressDelimiter + viper.GetString(common.MasterPort)
+	addr = strings.Split(addr, common.AddressDelimiter)[0] + viper.GetString(common.MasterPort)
 	conn, _ := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	client := pb.NewRaftServiceClient(conn)
 	reply, err := client.JoinCluster(ctx, args)
@@ -213,18 +231,21 @@ func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClus
 // monitorCluster Run in a goroutine.
 // This function will monitor the change of current master's state (leader -> follower, follower -> leader), and change
 // leader address in etcd when current master become the leader of the cluster.
-func monitorCluster() {
+func (handler *MasterHandler) monitorCluster() {
 	for {
 		select {
-		case isLeader := <-GlobalMasterHandler.MonitorChan:
+		case isLeader := <-handler.MonitorChan:
 			if isLeader {
-				kv := clientv3.NewKV(GlobalMasterHandler.EtcdClient)
-				_, err := kv.Put(context.Background(), common.LeaderAddressKey, GlobalMasterHandler.raftAddress)
+				kv := clientv3.NewKV(handler.EtcdClient)
+				_, err := kv.Put(context.Background(), common.LeaderAddressKey, handler.raftAddress)
 				if err != nil {
 					logrus.Errorf("Fail to put kv when leader change")
 				}
+				handler.FollowerStateObserver = getFollowerStateObserver()
+				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
 				logrus.Infof("Become leader, success to change etcd leader infomation")
 			} else {
+				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
 				logrus.Infof("Become follower")
 			}
 		}
