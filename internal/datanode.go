@@ -140,15 +140,13 @@ func adjust(node *DataNode) {
 	}
 }
 
-func ReleaseLease(fileNodeId string, chunkId string) error {
+func ReleaseLease(dataNodeId string, chunkId string) error {
 	updateMapLock.RLock()
-	defer func() {
-		updateMapLock.RUnlock()
-	}()
-	fileNode, ok := dataNodeMap[fileNodeId]
+	defer updateMapLock.RUnlock()
+	dataNode, ok := dataNodeMap[dataNodeId]
 	if !ok {
-		return fmt.Errorf("fail to get FileNode from dataNodeMap, fileNodeId : %s", fileNodeId)
+		return fmt.Errorf("fail to get FileNode from dataNodeMap, fileNodeId : %s", dataNodeId)
 	}
-	fileNode.Leases.Remove(chunkId)
+	dataNode.Leases.Remove(chunkId)
 	return nil
 }

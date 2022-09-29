@@ -182,6 +182,27 @@ func DoGetDataNodes4Add(fileNodeId string, chunkIndex int32) ([]string, string, 
 	return dataNodeAddrs, primaryNode.Address, nil
 }
 
+func DoCheckArgs4Get(path string) (*FileNode, error) {
+	fileNode, err := CheckAndGetFileNode(path)
+	if err != nil {
+		return nil, err
+	}
+	return fileNode, nil
+}
+
+func DoGetDataNodes4Get(fileNodeId string, chunkIndex int32) ([]string, []string, error) {
+	chunkId := fileNodeId + common.ChunkIdDelimiter + strconv.FormatInt(int64(chunkIndex), 10)
+	chunk := GetChunk(chunkId)
+	dataNodeIds := make([]string, len(chunk.dataNodes))
+	dataNodeAddrs := make([]string, len(chunk.dataNodes))
+	for i, nodeId := range chunk.dataNodes {
+		dataNode := GetDataNode(nodeId)
+		dataNodeIds[i] = dataNode.Id
+		dataNodeAddrs[i] = dataNode.Address
+	}
+	return dataNodeIds, dataNodeAddrs, nil
+}
+
 func DoUnlockDic4Add(fileNodeId string, isRead bool) error {
 	err := UnlockFileNodesById(fileNodeId, isRead)
 	if err != nil {
@@ -190,7 +211,7 @@ func DoUnlockDic4Add(fileNodeId string, isRead bool) error {
 	return nil
 }
 
-func DoReleaseLease4Add(chunkId string) error {
+func DoReleaseLease(chunkId string) error {
 	chunk := GetChunk(chunkId)
 	err := ReleaseLease(chunk.primaryNode, chunkId)
 	if err != nil {
@@ -198,7 +219,6 @@ func DoReleaseLease4Add(chunkId string) error {
 	}
 	return nil
 }
-
 func DoCheckAndMkdir(path string, dirName string) error {
 	_, err := AddFileNode(path, dirName, common.DirSize, false)
 	if err != nil {
@@ -222,4 +242,31 @@ func DoCheckAndRemove(path string) error {
 		return err
 	}
 	return nil
+}
+
+func DoCheckAndList(path string) ([]*FileNode, error) {
+	return ListFileNode(path)
+}
+
+func DoCheckAndStat(path string) (*FileNode, error) {
+	return StatFileNode(path)
+}
+
+func DoCheckAndRename(path, newName string) error {
+	_, err := RenameFileNode(path, newName)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func FileNode2FileInfo(nodes []*FileNode) []*pb.FileInfo {
+	files := make([]*pb.FileInfo, len(nodes))
+	for i := 0; i < len(nodes); i++ {
+		files[i] = &pb.FileInfo{
+			FileName: nodes[i].FileName,
+			IsFile:   nodes[i].IsFile,
+		}
+	}
+	return files
 }
