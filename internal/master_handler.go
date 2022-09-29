@@ -240,7 +240,7 @@ func (handler *MasterHandler) monitorCluster() {
 	}
 }
 
-// getFollowerStateObserver return a Observer which can observe the follower state.
+// getFollowerStateObserver return an Observer which can observe the follower state.
 func getFollowerStateObserver() *raft.Observer {
 	observerChan := make(chan raft.Observation)
 	// filterFn will filter FailedHeartbeatObservation from all incoming Observation and handle them.
