@@ -125,19 +125,6 @@ func (handler *MasterHandler) initRaft() error {
 	return nil
 }
 
-func getFollowerStateObserver() *raft.Observer {
-	observerChan := make(chan raft.Observation)
-	filterFn := func(o *raft.Observation) bool {
-		ob, ok := o.Data.(raft.FailedHeartbeatObservation)
-		if ok {
-			GlobalMasterHandler.Raft.RemoveServer(ob.PeerID, 0, 0)
-			logrus.Infof("Remove a dead follower, address: %s", string(ob.PeerID))
-		}
-		return ok
-	}
-	return raft.NewObserver(observerChan, false, filterFn)
-}
-
 // BootstrapOrJoinCluster Bootstrap cluster when there is no cluster, otherwise join cluster.
 func (handler *MasterHandler) BootstrapOrJoinCluster() error {
 	ctx := context.Background()
@@ -178,7 +165,7 @@ func (handler *MasterHandler) BootstrapOrJoinCluster() error {
 }
 
 // joinCluster Called by follower.
-// join itself to the cluster.
+// Join itself to the cluster.
 func (handler *MasterHandler) joinCluster(args *pb.JoinClusterArgs) (*pb.JoinClusterReply, error) {
 	ctx := context.Background()
 	kv := clientv3.NewKV(GlobalMasterHandler.EtcdClient)
@@ -229,8 +216,9 @@ func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClus
 }
 
 // monitorCluster Run in a goroutine.
-// This function will monitor the change of current master's state (leader -> follower, follower -> leader), and change
-// leader address in etcd when current master become the leader of the cluster.
+// This function will monitor the change of current master's state (leader -> follower, follower -> leader).
+// When current master become the leader of the cluster, it will change leader address in etcd and add an observer to
+// observe follower state.
 func (handler *MasterHandler) monitorCluster() {
 	for {
 		select {
@@ -250,6 +238,21 @@ func (handler *MasterHandler) monitorCluster() {
 			}
 		}
 	}
+}
+
+// getFollowerStateObserver return a Observer which can observe the follower state.
+func getFollowerStateObserver() *raft.Observer {
+	observerChan := make(chan raft.Observation)
+	// filterFn will filter FailedHeartbeatObservation from all incoming Observation and handle them.
+	filterFn := func(o *raft.Observation) bool {
+		ob, ok := o.Data.(raft.FailedHeartbeatObservation)
+		if ok {
+			GlobalMasterHandler.Raft.RemoveServer(ob.PeerID, 0, 0)
+			logrus.Infof("Remove a dead follower, address: %s", string(ob.PeerID))
+		}
+		return ok
+	}
+	return raft.NewObserver(observerChan, false, filterFn)
 }
 
 // Heartbeat 由Chunkserver调用该方法，维持心跳
