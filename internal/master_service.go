@@ -112,7 +112,7 @@ func DoGetDataNodes4Add(fileNodeId string, chunkIndex int32) ([]string, string, 
 	return dataNodeAddrs, primaryNode.Address, nil
 }
 
-func DoCheckAndGet(path string) (*FileNode, error) {
+func DoCheckArgs4Get(path string) (*FileNode, error) {
 	fileNode, err := CheckAndGetFileNode(path)
 	if err != nil {
 		return nil, err
@@ -141,7 +141,7 @@ func DoUnlockDic4Add(fileNodeId string, isRead bool) error {
 	return nil
 }
 
-func DoReleaseLease4Add(chunkId string) error {
+func DoReleaseLease(chunkId string) error {
 	chunk := GetChunk(chunkId)
 	err := ReleaseLease(chunk.primaryNode, chunkId)
 	if err != nil {
@@ -149,16 +149,6 @@ func DoReleaseLease4Add(chunkId string) error {
 	}
 	return nil
 }
-
-func DoReleaseLease4Get(chunkId string) error {
-	chunk := GetChunk(chunkId)
-	err := ReleaseLease(chunk.primaryNode, chunkId)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func DoCheckAndMkdir(path string, dirName string) error {
 	_, err := AddFileNode(path, dirName, common.DirSize, false)
 	if err != nil {

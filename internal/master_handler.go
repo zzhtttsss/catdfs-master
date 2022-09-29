@@ -141,7 +141,7 @@ func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAnd
 		return nil, details.Err()
 	}
 
-	fileNode, err := DoCheckAndGet(args.Path)
+	fileNode, err := DoCheckArgs4Get(args.Path)
 	if err != nil {
 		logrus.Errorf("Fail to get dataNode for get operation, error code: %v, error detail: %s", common.MasterCheckAndGetFailed, err)
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
@@ -180,7 +180,7 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 }
 
 // GetDataNodes4Get called by client
-// GetDataNodes4Get find the dataNodes for the specified chunkId
+// find the dataNodes for the specified chunkId
 func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.GetDataNodes4GetArgs) (*pb.GetDataNodes4GetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for getting data node, FileNodeId: %s", args.FileNodeId)
 	dataNodeIds, dataNodeAddrs, err := DoGetDataNodes4Get(args.FileNodeId, args.ChunkIndex)
@@ -236,7 +236,7 @@ func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.Unlock
 // Release the lease of a chunk.
 func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.ReleaseLease4AddArgs) (*pb.ReleaseLease4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
-	err := DoReleaseLease4Add(args.ChunkId)
+	err := DoReleaseLease(args.ChunkId)
 	if err != nil {
 		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4AddFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
@@ -255,7 +255,7 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 // Release the lease of a chunk.
 func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.ReleaseLease4GetArgs) (*pb.ReleaseLease4GetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
-	err := DoReleaseLease4Get(args.ChunkId)
+	err := DoReleaseLease(args.ChunkId)
 	if err != nil {
 		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4GetFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
