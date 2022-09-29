@@ -29,16 +29,20 @@
 
 FROM golang:1.18-alpine AS build
 WORKDIR /app
+COPY go.mod go.mod
+COPY go.sum go.sum
+RUN go mod download
+
 ADD . /app
 
 # 以下两者仅存其一
 # m
-EXPOSE 9099
-RUN CGO_ENABLED=0 GOOS=linux go build ./cmd/main.go
+#EXPOSE 9099
+#RUN CGO_ENABLED=0 GOOS=linux go build ./cmd/main.go
 
 # sm
-#EXPOSE 9100
-#RUN CGO_ENABLED=0 GOOS=linux go build ./shadow_master/cmd/main.go
+EXPOSE 9100
+RUN CGO_ENABLED=0 GOOS=linux go build ./shadow_master/cmd/main.go
 
 
 ENTRYPOINT ["./main"]

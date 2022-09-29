@@ -30,6 +30,7 @@ type MasterHandler struct {
 	pb.UnimplementedMasterRenameServiceServer
 	pb.UnimplementedMasterListServiceServer
 	pb.UnimplementedMasterStatServiceServer
+	pb.UnimplementedMasterGetServiceServer
 }
 
 //CreateMasterHandler 创建MasterHandler
@@ -124,6 +125,39 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 
 }
 
+// CheckAndGet called by client
+// check get args and get the filenode according to path
+func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAndGetArgs) (*pb.CheckAndGetReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for getting fileNode for path, Path: %s", args.Path)
+	client := pb.NewSendOperationServiceClient(handler.ClientCon)
+	op := OperationGet(args.Path)
+	_, err := client.SendOperation(context.Background(), op)
+	if err != nil {
+		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndGetFailed, err.Error())
+		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndGetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
+	fileNode, err := DoCheckArgs4Get(args.Path)
+	if err != nil {
+		logrus.Errorf("Fail to get dataNode for get operation, error code: %v, error detail: %s", common.MasterCheckAndGetFailed, err)
+		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndGetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.CheckAndGetReply{
+		FileNodeId:  fileNode.Id,
+		ChunkNum:    int32(len(fileNode.Chunks)),
+		OperationId: op.Uuid,
+	}
+	return rep, nil
+}
+
 // GetDataNodes4Add Called by client.
 // Allocate some DataNode to store a Chunk and select the primary DataNode
 func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.GetDataNodes4AddArgs) (*pb.GetDataNodes4AddReply, error) {
@@ -142,6 +176,28 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 		PrimaryNode: primaryNode,
 	}
 	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk for add operation, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
+	return rep, nil
+}
+
+// GetDataNodes4Get called by client
+// find the dataNodes for the specified chunkId
+func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.GetDataNodes4GetArgs) (*pb.GetDataNodes4GetReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for getting data node, FileNodeId: %s", args.FileNodeId)
+	dataNodeIds, dataNodeAddrs, err := DoGetDataNodes4Get(args.FileNodeId, args.ChunkIndex)
+	if err != nil {
+		logrus.Errorf("Fail to get dataNodes for get operation, error code: %v, error detail: %s,", common.MasterGetDataNodes4GetFailed, err.Error())
+		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterGetDataNodes4GetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.GetDataNodes4GetReply{
+		DataNodeIds:   dataNodeIds,
+		DataNodeAddrs: dataNodeAddrs,
+		ChunkIndex:    args.ChunkIndex,
+	}
+	logrus.WithContext(ctx).Infof("Success to get dataNodes for get operation, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
 	return rep, nil
 }
 
@@ -180,7 +236,7 @@ func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.Unlock
 // Release the lease of a chunk.
 func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.ReleaseLease4AddArgs) (*pb.ReleaseLease4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
-	err := DoReleaseLease4Add(args.ChunkId)
+	err := DoReleaseLease(args.ChunkId)
 	if err != nil {
 		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4AddFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
@@ -193,6 +249,24 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
 	return rep, nil
 
+}
+
+// ReleaseLease4Get Called by client.
+// Release the lease of a chunk.
+func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.ReleaseLease4GetArgs) (*pb.ReleaseLease4GetReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
+	err := DoReleaseLease(args.ChunkId)
+	if err != nil {
+		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4GetFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterReleaseLease4GetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	rep := &pb.ReleaseLease4GetReply{}
+	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
+	return rep, nil
 }
 
 // CheckAndMkdir Called by client.
@@ -478,6 +552,7 @@ func (handler *MasterHandler) Server() {
 	pb.RegisterMasterListServiceServer(server, handler)
 	pb.RegisterMasterRenameServiceServer(server, handler)
 	pb.RegisterMasterStatServiceServer(server, handler)
+	pb.RegisterMasterGetServiceServer(server, handler)
 	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
 	server.Serve(listener)
 }
