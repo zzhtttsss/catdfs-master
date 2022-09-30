@@ -30,7 +30,13 @@ import (
 var GlobalMasterHandler *MasterHandler
 
 type MasterHandler struct {
-	ClientCon *grpc.ClientConn
+	ClientCon             *grpc.ClientConn
+	FSM                   *MasterFSM
+	Raft                  *raft.Raft
+	FollowerStateObserver *raft.Observer
+	MonitorChan           chan bool
+	EtcdClient            *clientv3.Client
+	raftAddress           string
 	pb.UnimplementedRegisterServiceServer
 	pb.UnimplementedHeartbeatServiceServer
 	pb.UnimplementedMasterAddServiceServer
@@ -42,12 +48,6 @@ type MasterHandler struct {
 	pb.UnimplementedMasterStatServiceServer
 	pb.UnimplementedMasterGetServiceServer
 	pb.UnimplementedRaftServiceServer
-	FSM                   *MasterFSM
-	Raft                  *raft.Raft
-	FollowerStateObserver *raft.Observer
-	MonitorChan           chan bool
-	EtcdClient            *clientv3.Client
-	raftAddress           string
 }
 
 // CreateMasterHandler Create a global MasterHandler which will handle all incoming requests.
@@ -63,7 +63,7 @@ func CreateMasterHandler() {
 	})
 	err = GlobalMasterHandler.initRaft()
 	if err != nil {
-		logrus.Panicf("fail to init raft, error detail : %s", err.Error())
+		logrus.Panicf("Fail to init raft, error detail : %s", err.Error())
 	}
 }
 
@@ -480,15 +480,14 @@ func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckA
 		Id:       util.GenerateUUIDString(),
 		Des:      args.Path,
 		FileName: args.DirName,
-		Type:     Operation_Mkdir,
 	}
-	operationBytes, err := json.Marshal(operation)
-	if err != nil {
-		logrus.Errorf("Fail to check args and make directory at target path, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
-		return nil, err
+	operationBytes, _ := json.Marshal(operation)
+	opContainer := OpContainer{
+		OpType: common.OperationMkdir,
+		OpData: operationBytes,
 	}
-
-	applyFuture := handler.Raft.Apply(operationBytes, 5*time.Second)
+	data, _ := json.Marshal(opContainer)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
 	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to check args and make directory at target path, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{

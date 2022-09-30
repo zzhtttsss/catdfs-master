@@ -39,15 +39,17 @@ func (ms MasterFSM) Apply(l *raft.Log) interface{} {
 
 // ConvBytes2Operation Use reflect to restore operation from data
 func ConvBytes2Operation(data []byte) Operation {
-	// get type of operation from data
-	dataString := string(data)
-	dataString = strings.Trim(dataString, "}")
-	dataStringArray := strings.Split(dataString, ":")
-	opType := strings.Trim(dataStringArray[len(dataStringArray)-1], "\"")
-	// the operationValue is already a pointer
-	operationValue := reflect.New(OperationTypes[opType])
-	json.Unmarshal(data, operationValue)
-	operation := operationValue.Interface().(Operation)
+	opContainer := OpContainer{}
+	var operation Operation
+	err := json.Unmarshal(data, &opContainer)
+	if err != nil {
+		return nil
+	}
+	operation = reflect.New(OperationTypes[opContainer.OpType]).Interface().(Operation)
+	err = json.Unmarshal(opContainer.OpData, operation)
+	if err != nil {
+		return nil
+	}
 	return operation
 }
 
@@ -56,7 +58,12 @@ func (ms MasterFSM) Snapshot() (raft.FSMSnapshot, error) {
 }
 
 func (ms MasterFSM) Restore(r io.ReadCloser) error {
-	logrus.Infof("restore when start")
+	logrus.Println("Start to restore metadata.")
+	rootMap := ReadSnapshotLines(r)
+	if rootMap != nil && len(rootMap) != 0 {
+		logrus.Println("Start to Deserialize directory tree.")
+		root = RootDeserialize(rootMap)
+	}
 	return r.Close()
 }
 
@@ -217,14 +224,6 @@ func DoReleaseLease(chunkId string) error {
 	if err != nil {
 		return err
 	}
-	return nil
-}
-func DoCheckAndMkdir(path string, dirName string) error {
-	_, err := AddFileNode(path, dirName, common.DirSize, false)
-	if err != nil {
-		return err
-	}
-	logrus.Infof("success to mkdir")
 	return nil
 }
 
