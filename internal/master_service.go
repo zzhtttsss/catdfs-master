@@ -1,13 +1,18 @@
 package internal
 
 import (
+	"container/list"
 	"context"
+	"encoding/json"
 	"fmt"
 	set "github.com/deckarep/golang-set"
 	"github.com/google/uuid"
+	"github.com/hashicorp/raft"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc/peer"
+	"io"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +23,78 @@ import (
 const (
 	isFile4File = true
 )
+
+type MasterFSM struct {
+}
+
+// Apply This function will call Apply function of operation, changes to metadata will be made in that function
+func (ms MasterFSM) Apply(l *raft.Log) interface{} {
+	operation := ConvBytes2Operation(l.Data)
+	err := operation.Apply()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// ConvBytes2Operation Use reflect to restore operation from data
+func ConvBytes2Operation(data []byte) Operation {
+	opContainer := OpContainer{}
+	var operation Operation
+	err := json.Unmarshal(data, &opContainer)
+	if err != nil {
+		return nil
+	}
+	operation = reflect.New(OperationTypes[opContainer.OpType]).Interface().(Operation)
+	err = json.Unmarshal(opContainer.OpData, operation)
+	if err != nil {
+		return nil
+	}
+	return operation
+}
+
+func (ms MasterFSM) Snapshot() (raft.FSMSnapshot, error) {
+	return &snapshot{}, nil
+}
+
+func (ms MasterFSM) Restore(r io.ReadCloser) error {
+	logrus.Println("Start to restore metadata.")
+	rootMap := ReadSnapshotLines(r)
+	if rootMap != nil && len(rootMap) != 0 {
+		logrus.Println("Start to Deserialize directory tree.")
+		root = RootDeserialize(rootMap)
+	}
+	return r.Close()
+}
+
+type snapshot struct {
+}
+
+// Persist Take a snapshot of current metadata.
+func (s *snapshot) Persist(sink raft.SnapshotSink) error {
+	queue := list.New()
+	queue.PushBack(root)
+	for queue.Len() != 0 {
+		cur := queue.Front()
+		queue.Remove(cur)
+		node, ok := cur.Value.(*FileNode)
+		if !ok {
+			logrus.Warnf("Fail to convert element to FileNode")
+		}
+		_, err := sink.Write([]byte(node.String()))
+		if err != nil {
+			logrus.Errorf("Fail to write string, error detail %s", err.Error())
+		}
+		for _, child := range node.ChildNodes {
+			queue.PushBack(child)
+		}
+	}
+	return sink.Close()
+}
+
+func (s *snapshot) Release() {
+
+}
 
 func DoRegister(ctx context.Context) (string, error) {
 	var (
@@ -144,13 +221,6 @@ func DoUnlockDic4Add(fileNodeId string, isRead bool) error {
 func DoReleaseLease(chunkId string) error {
 	chunk := GetChunk(chunkId)
 	err := ReleaseLease(chunk.primaryNode, chunkId)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-func DoCheckAndMkdir(path string, dirName string) error {
-	_, err := AddFileNode(path, dirName, common.DirSize, false)
 	if err != nil {
 		return err
 	}

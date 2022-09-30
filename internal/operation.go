@@ -3,8 +3,11 @@ package internal
 import (
 	"bufio"
 	"container/list"
+	"encoding/json"
 	"github.com/sirupsen/logrus"
+	"io"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +41,37 @@ const (
 	Operation_Stat   = "Stat"
 	Operation_Finish = "Finish"
 )
+
+var (
+	OperationTypes = make(map[string]reflect.Type)
+)
+
+func init() {
+	OperationTypes[common.OperationMkdir] = reflect.TypeOf(MkdirOperation{})
+}
+
+type Operation interface {
+	Apply() error
+}
+
+type OpContainer struct {
+	OpType string          `json:"op_type"`
+	OpData json.RawMessage `json:"op_data"`
+}
+
+type MkdirOperation struct {
+	Id       string `json:"id"`
+	Des      string `json:"des"`
+	FileName string `json:"file_name"`
+}
+
+func (o MkdirOperation) Apply() error {
+	_, err := AddFileNode(o.Des, o.FileName, common.DirSize, false)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
 func OperationAdd(des string, isFile bool, fileName string, size int64) *pb.OperationArgs {
 	return &pb.OperationArgs{
@@ -251,6 +285,66 @@ func ReadLogLines(path string) []*pb.OperationArgs {
 		} else {
 			res = append(res, opMap[op.Uuid])
 		}
+	}
+	return res
+}
+
+// ReadSnapshotLines returns map whose key is the id of the filenode rather than filename
+func ReadSnapshotLines(r io.ReadCloser) map[string]*FileNode {
+	buf := bufio.NewScanner(r)
+	res := map[string]*FileNode{}
+	for buf.Scan() {
+		line := buf.Text()
+		data := strings.Split(line, "$")
+		childrenLen := len(data[childrenIdx])
+		childrenData := data[childrenIdx][1 : childrenLen-1]
+		var children map[string]*FileNode
+		if childrenData == "" {
+			children = nil
+		} else {
+			children = map[string]*FileNode{}
+			for _, childId := range strings.Split(childrenData, " ") {
+				children[childId] = &FileNode{
+					Id: childId,
+				}
+			}
+		}
+		chunksLen := len(data[chunksIdIdx])
+		chunksData := data[chunksIdIdx][1 : chunksLen-1]
+		var chunks []string
+		if chunksData == "" {
+			//TODO NPE隐患
+			chunks = nil
+		} else {
+			chunks = strings.Split(chunksData, " ")
+		}
+		size, _ := strconv.Atoi(data[sizeIdx])
+		isFile, _ := strconv.ParseBool(data[isFileIdx])
+		delTime, _ := time.Parse(common.LogFileTimeFormat, data[delTimeIdx])
+		var delTimePtr *time.Time
+		if data[delTimeIdx] == "<nil>" {
+			delTimePtr = nil
+		} else {
+			delTimePtr = &delTime
+		}
+		isDel, _ := strconv.ParseBool(data[isDelIdx])
+		lastLockTime, _ := time.Parse(common.LogFileTimeFormat, data[lastLockTimeIdx])
+		fn := &FileNode{
+			Id:       data[idIdx],
+			FileName: data[fileNameIdx],
+			ParentNode: &FileNode{
+				Id: data[parentIdIdx],
+			},
+			ChildNodes:     children,
+			Chunks:         chunks,
+			Size:           int64(size),
+			IsFile:         isFile,
+			DelTime:        delTimePtr,
+			IsDel:          isDel,
+			UpdateNodeLock: &sync.RWMutex{},
+			LastLockTime:   lastLockTime,
+		}
+		res[fn.Id] = fn
 	}
 	return res
 }

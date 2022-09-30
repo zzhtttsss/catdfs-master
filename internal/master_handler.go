@@ -2,25 +2,41 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"net"
 	"os"
-	"tinydfs-base/common"
+	"path/filepath"
+	"strings"
+	"time"
 	"tinydfs-base/config"
+	"tinydfs-base/util"
+
+	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
 )
 
 var GlobalMasterHandler *MasterHandler
 
-const maxErrorCount = 3
-
 type MasterHandler struct {
-	ClientCon *grpc.ClientConn
+	ClientCon             *grpc.ClientConn
+	FSM                   *MasterFSM
+	Raft                  *raft.Raft
+	FollowerStateObserver *raft.Observer
+	MonitorChan           chan bool
+	EtcdClient            *clientv3.Client
+	raftAddress           string
 	pb.UnimplementedRegisterServiceServer
 	pb.UnimplementedHeartbeatServiceServer
 	pb.UnimplementedMasterAddServiceServer
@@ -31,29 +47,216 @@ type MasterHandler struct {
 	pb.UnimplementedMasterListServiceServer
 	pb.UnimplementedMasterStatServiceServer
 	pb.UnimplementedMasterGetServiceServer
+	pb.UnimplementedRaftServiceServer
 }
 
-//CreateMasterHandler 创建MasterHandler
+// CreateMasterHandler Create a global MasterHandler which will handle all incoming requests.
 func CreateMasterHandler() {
+	var err error
 	config.InitConfig()
-	rootMap := ReadRootLines(common.DirectoryFileName)
-	if rootMap != nil && len(rootMap) != 0 {
-		logrus.Println("Root Deserialize")
-		root = RootDeserialize(rootMap)
+	GlobalMasterHandler = &MasterHandler{
+		FSM: &MasterFSM{},
 	}
-	Merge2Root(root, ReadLogLines(common.LogFileName))
-	// Connect Shadow master
-	addr := viper.GetString(common.SMAddr) + viper.GetString(common.SMPort)
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	errCount := 0
-	for err != nil && errCount < maxErrorCount {
-		conn, err = grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		errCount++
+	GlobalMasterHandler.EtcdClient, err = clientv3.New(clientv3.Config{
+		Endpoints:   []string{viper.GetString(common.EtcdEndPoint)},
+		DialTimeout: 5 * time.Second,
+	})
+	err = GlobalMasterHandler.initRaft()
+	if err != nil {
+		logrus.Panicf("Fail to init raft, error detail : %s", err.Error())
 	}
-	if errCount < maxErrorCount {
-		logrus.Info("Success Connect to Shadow master!")
+}
+
+// initRaft Initial the raft config of the MasterHandler.
+func (handler *MasterHandler) initRaft() error {
+	raftConfig := raft.DefaultConfig()
+	raftConfig.SnapshotInterval = 20 * time.Second
+	raftConfig.SnapshotThreshold = 128
+	raftConfig.Logger = hclog.L()
+
+	localIP, err := util.GetLocalIP()
+	if err != nil {
+		return err
 	}
-	GlobalMasterHandler = &MasterHandler{ClientCon: conn}
+	handler.raftAddress = localIP + common.AddressDelimiter + viper.GetString(common.MasterRaftPort)
+	raftConfig.LocalID = raft.ServerID(handler.raftAddress)
+
+	handler.MonitorChan = make(chan bool, 1)
+	raftConfig.NotifyCh = handler.MonitorChan
+	go handler.monitorCluster()
+
+	addr, err := net.ResolveTCPAddr(common.TCP, handler.raftAddress)
+	if err != nil {
+		logrus.Errorf("Fail to resolve TCP address, error detail: %s", err.Error())
+		return err
+	}
+	tcpTransport, err := raft.NewTCPTransport(handler.raftAddress, addr, 3, 10*time.Second, os.Stderr)
+	if err != nil {
+		logrus.Errorf("Fail to create TCP Transport, error detail: %s", err.Error())
+
+		return err
+	}
+
+	raftDir := viper.GetString(common.MasterRaftDir)
+	fss, err := raft.NewFileSnapshotStore(raftDir, 2, os.Stderr)
+	if err != nil {
+		logrus.Errorf("Fail to create FileSnapshotStore, error detail: %s", err.Error())
+		return err
+	}
+
+	logDB, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "logs.dat"))
+	if err != nil {
+		logrus.Errorf("Fail to create log DB, error detail: %s", err.Error())
+		return err
+	}
+	stableDB, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "stable.dat"))
+	if err != nil {
+		logrus.Errorf("Fail to create stable DB, error detail: %s", err.Error())
+		return err
+	}
+
+	r, err := raft.NewRaft(raftConfig, handler.FSM, logDB, stableDB, fss, tcpTransport)
+	if err != nil {
+		logrus.Errorf("Fail to create raft node, error detail: %s", err.Error())
+		return err
+	}
+	handler.Raft = r
+	err = handler.BootstrapOrJoinCluster()
+	if err != nil {
+		logrus.Errorf("Fail to bootstrap or join, error detail: %s", err.Error())
+		return err
+	}
+	return nil
+}
+
+// BootstrapOrJoinCluster Bootstrap cluster when there is no cluster, otherwise join cluster.
+func (handler *MasterHandler) BootstrapOrJoinCluster() error {
+	ctx := context.Background()
+	kv := clientv3.NewKV(GlobalMasterHandler.EtcdClient)
+	getResp, err := kv.Get(ctx, common.LeaderAddressKey)
+	if err != nil {
+		logrus.Errorf("Fail to get kv when init, error detail: %s", err.Error())
+		return err
+	}
+	if len(getResp.Kvs) == 0 {
+		logrus.Infof("No cluster, start to bootstrap cluster")
+		configuration := raft.Configuration{
+			Servers: []raft.Server{
+				{
+					ID:      raft.ServerID(handler.raftAddress),
+					Address: raft.ServerAddress(handler.raftAddress),
+				},
+			},
+		}
+		f := handler.Raft.BootstrapCluster(configuration)
+		if err := f.Error(); err != nil {
+			logrus.Errorf("Fail to bootstrap, error detail: %s", err.Error())
+		}
+		_, err = kv.Put(ctx, common.LeaderAddressKey, handler.raftAddress)
+		if err != nil {
+			logrus.Errorf("Fail to get kv when init, error detail: %s", err.Error())
+			//todo 失败重试
+		}
+	} else {
+		logrus.Infof("Already have cluster, start to join cluster")
+		_, err := handler.joinCluster(&pb.JoinClusterArgs{})
+		if err != nil {
+			logrus.Errorf("Fail to join cluster, error detail: %s", err.Error())
+			return err
+		}
+	}
+	return nil
+}
+
+// joinCluster Called by follower.
+// Join itself to the cluster.
+func (handler *MasterHandler) joinCluster(args *pb.JoinClusterArgs) (*pb.JoinClusterReply, error) {
+	ctx := context.Background()
+	kv := clientv3.NewKV(GlobalMasterHandler.EtcdClient)
+	getResp, err := kv.Get(ctx, common.LeaderAddressKey)
+	if err != nil {
+		logrus.Errorf("Fail to get key-value when join cluster, error deatil: %s", err.Error())
+	}
+	addr := string(getResp.Kvs[0].Value)
+	addr = strings.Split(addr, common.AddressDelimiter)[0] + viper.GetString(common.MasterPort)
+	conn, _ := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	client := pb.NewRaftServiceClient(conn)
+	reply, err := client.JoinCluster(ctx, args)
+	if err != nil {
+		logrus.Errorf("Fail to join cluster, error detail : %s", err.Error())
+	}
+	return reply, err
+}
+
+// JoinCluster Called by follower.
+// leader will join a follower to the cluster.
+func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClusterArgs) (*pb.JoinClusterReply, error) {
+	p, _ := peer.FromContext(ctx)
+	address := strings.Split(p.Addr.String(), common.AddressDelimiter)[0]
+	rAddress := address + common.AddressDelimiter + viper.GetString(common.MasterRaftPort)
+	logrus.Infof("Get request to join cluster, address : %s", rAddress)
+	cf := handler.Raft.GetConfiguration()
+
+	if err := cf.Error(); err != nil {
+		logrus.Errorf("Fail to get raft config, error detail : %s", err.Error())
+		return nil, err
+	}
+
+	for _, server := range cf.Configuration().Servers {
+		if server.ID == raft.ServerID(rAddress) {
+			logrus.Errorf("Node already joined raft cluster, address : %s", address)
+			return nil, fmt.Errorf("node already joined raft cluster, address : %s", address)
+		}
+	}
+
+	f := handler.Raft.AddVoter(raft.ServerID(rAddress), raft.ServerAddress(rAddress), 0, 0)
+	if err := f.Error(); err != nil {
+		logrus.Errorf("fail to add voter, address : %s, error deatail : %s", address, err.Error())
+		return nil, err
+	}
+
+	logrus.Infof("node joined successfully, address : %s", address)
+	return &pb.JoinClusterReply{}, nil
+}
+
+// monitorCluster Run in a goroutine.
+// This function will monitor the change of current master's state (leader -> follower, follower -> leader).
+// When current master become the leader of the cluster, it will change leader address in etcd and add an observer to
+// observe follower state.
+func (handler *MasterHandler) monitorCluster() {
+	for {
+		select {
+		case isLeader := <-handler.MonitorChan:
+			if isLeader {
+				kv := clientv3.NewKV(handler.EtcdClient)
+				_, err := kv.Put(context.Background(), common.LeaderAddressKey, handler.raftAddress)
+				if err != nil {
+					logrus.Errorf("Fail to put kv when leader change")
+				}
+				handler.FollowerStateObserver = getFollowerStateObserver()
+				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
+				logrus.Infof("Become leader, success to change etcd leader infomation")
+			} else {
+				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
+				logrus.Infof("Become follower")
+			}
+		}
+	}
+}
+
+// getFollowerStateObserver return an Observer which can observe the follower state.
+func getFollowerStateObserver() *raft.Observer {
+	observerChan := make(chan raft.Observation)
+	// filterFn will filter FailedHeartbeatObservation from all incoming Observation and handle them.
+	filterFn := func(o *raft.Observation) bool {
+		ob, ok := o.Data.(raft.FailedHeartbeatObservation)
+		if ok {
+			GlobalMasterHandler.Raft.RemoveServer(ob.PeerID, 0, 0)
+			logrus.Infof("Remove a dead follower, address: %s", string(ob.PeerID))
+		}
+		return ok
+	}
+	return raft.NewObserver(observerChan, false, filterFn)
 }
 
 // Heartbeat 由Chunkserver调用该方法，维持心跳
@@ -273,36 +476,21 @@ func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.Rel
 // Check args and make directory at target path.
 func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckAndMkDirArgs) (*pb.CheckAndMkDirReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and make directory at target path from client, path: %s, dirName: %s", args.Path, args.DirName)
-	client := pb.NewSendOperationServiceClient(handler.ClientCon)
-	op := OperationMkdir(args.Path, args.DirName)
-	_, err := client.SendOperation(context.Background(), op)
-	if err != nil {
-		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckAndMkdirFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
+	operation := &MkdirOperation{
+		Id:       util.GenerateUUIDString(),
+		Des:      args.Path,
+		FileName: args.DirName,
 	}
-
-	err = DoCheckAndMkdir(args.Path, args.DirName)
-	if err != nil {
+	operationBytes, _ := json.Marshal(operation)
+	opContainer := OpContainer{
+		OpType: common.OperationMkdir,
+		OpData: operationBytes,
+	}
+	data, _ := json.Marshal(opContainer)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to check args and make directory at target path, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckAndMkdirFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-
-	client = pb.NewSendOperationServiceClient(handler.ClientCon)
-	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
-		Uuid:     op.Uuid,
-		IsFinish: true,
-	})
-	if err != nil {
-		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndMkdirFailed,
 			Msg:  err.Error(),
 		})
@@ -553,6 +741,7 @@ func (handler *MasterHandler) Server() {
 	pb.RegisterMasterRenameServiceServer(server, handler)
 	pb.RegisterMasterStatServiceServer(server, handler)
 	pb.RegisterMasterGetServiceServer(server, handler)
+	pb.RegisterRaftServiceServer(server, handler)
 	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
 	server.Serve(listener)
 }
