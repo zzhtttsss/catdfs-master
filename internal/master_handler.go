@@ -264,6 +264,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
 	err := DoHeartbeat(args.Id)
 	if err != nil {
+		csCountMonitor.Dec()
 		logrus.Errorf("Fail to heartbeat, error code: %v, error detail: %s,", common.MasterHeartbeatFailed, err.Error())
 		details, _ := status.New(codes.NotFound, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterHeartbeatFailed,
@@ -286,6 +287,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		})
 		return nil, details.Err()
 	}
+	csCountMonitor.Inc()
 	rep := &pb.DNRegisterReply{
 		Id: id,
 	}
@@ -730,7 +732,7 @@ func (handler *MasterHandler) Server() {
 		logrus.Errorf("Fail to server, error code: %v, error detail: %s,", common.MasterRPCServerFailed, err.Error())
 		os.Exit(1)
 	}
-	server := grpc.NewServer()
+	server := grpc.NewServer([]grpc.ServerOption{grpc.UnaryInterceptor(interceptor)}...)
 	pb.RegisterRegisterServiceServer(server, handler)
 	pb.RegisterHeartbeatServiceServer(server, handler)
 	pb.RegisterMasterAddServiceServer(server, handler)

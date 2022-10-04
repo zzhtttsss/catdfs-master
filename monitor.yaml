@@ -1,0 +1,49 @@
+version: '3.8'
+
+networks:
+  default:
+    external:
+      name: es-network
+volumes:
+  hostproc:
+    external: false
+  etcd-data:
+    external: false
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.0
+    container_name: etcd
+    privileged: true
+    volumes:
+      - 'etcd-data:/etcd-data'
+    networks:
+      default:
+        ipv4_address: 172.18.0.20
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    command: /usr/local/bin/etcd --data-dir=/etcd-data --name node1 --initial-advertise-peer-urls http://172.18.0.20:2380 --listen-peer-urls http://0.0.0.0:2380 --advertise-client-urls http://172.18.0.20:2379 --listen-client-urls http://0.0.0.0:2379 --initial-cluster node1=http://172.18.0.20:2380
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    restart: always
+    links:
+      - prometheus
+    depends_on:
+      - prometheus
+    networks:
+      - default
+    ports:
+      - "3000:3000"
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    restart: always
+    networks:
+      - default
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
