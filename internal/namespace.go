@@ -296,7 +296,7 @@ func (f *FileNode) String() string {
 	return res.String()
 }
 
-// IsDeepEqualTo is used to compare two filenodes
+// IsDeepEqualTo is used to compare two FileNode
 func (f *FileNode) IsDeepEqualTo(t *FileNode) bool {
 	arr1 := make([]*FileNode, 0)
 	arr2 := make([]*FileNode, 0)

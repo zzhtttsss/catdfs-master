@@ -24,17 +24,22 @@ const (
 	isFile4File = true
 )
 
+type ApplyResponse struct {
+	Response interface{}
+	Error    error
+}
+
 type MasterFSM struct {
 }
 
 // Apply This function will call Apply function of operation, changes to metadata will be made in that function
 func (ms MasterFSM) Apply(l *raft.Log) interface{} {
 	operation := ConvBytes2Operation(l.Data)
-	err := operation.Apply()
-	if err != nil {
-		return err
+	response, err := operation.Apply()
+	return ApplyResponse{
+		Response: response,
+		Error:    err,
 	}
-	return nil
 }
 
 // ConvBytes2Operation Use reflect to restore operation from data
@@ -225,47 +230,4 @@ func DoReleaseLease(chunkId string) error {
 		return err
 	}
 	return nil
-}
-
-func DoCheckAndMove(sourcePath string, targetPath string) error {
-	_, err := MoveFileNode(sourcePath, targetPath)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func DoCheckAndRemove(path string) error {
-	_, err := RemoveFileNode(path)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func DoCheckAndList(path string) ([]*FileNode, error) {
-	return ListFileNode(path)
-}
-
-func DoCheckAndStat(path string) (*FileNode, error) {
-	return StatFileNode(path)
-}
-
-func DoCheckAndRename(path, newName string) error {
-	_, err := RenameFileNode(path, newName)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func FileNode2FileInfo(nodes []*FileNode) []*pb.FileInfo {
-	files := make([]*pb.FileInfo, len(nodes))
-	for i := 0; i < len(nodes); i++ {
-		files[i] = &pb.FileInfo{
-			FileName: nodes[i].FileName,
-			IsFile:   nodes[i].IsFile,
-		}
-	}
-	return files
 }

@@ -296,21 +296,16 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 // Check whether the path and file name entered by the user in the Add operation are legal.
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
-	client := pb.NewSendOperationServiceClient(handler.ClientCon)
-	op := OperationAdd(args.Path, true, args.FileName, args.Size)
-	_, err := client.SendOperation(context.Background(), op)
-	if err != nil {
-		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckArgs4AddFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
+	operation := &AddOperation{
+		Id:       util.GenerateUUIDString(),
+		Path:     args.Path,
+		FileName: args.FileName,
+		Size:     args.Size,
+		Stage:    common.CheckArgs,
 	}
-
-	fileNodeId, chunkNum, err := DoCheckArgs4Add(args)
-	logrus.Infof("fileNodeId[%s] with chunkNum[%d]", fileNodeId, chunkNum)
-	if err != nil {
+	data := getData4Apply(operation, common.OperationAdd)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to check path and filename for add operation, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckArgs4AddFailed,
@@ -318,34 +313,32 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 		})
 		return nil, details.Err()
 	}
-
-	rep := &pb.CheckArgs4AddReply{
-		FileNodeId: fileNodeId,
-		ChunkNum:   chunkNum,
-		Uuid:       op.Uuid,
-	}
-	return rep, nil
-
-}
-
-// CheckAndGet called by client
-// check get args and get the filenode according to path
-func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAndGetArgs) (*pb.CheckAndGetReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for getting fileNode for path, Path: %s", args.Path)
-	client := pb.NewSendOperationServiceClient(handler.ClientCon)
-	op := OperationGet(args.Path)
-	_, err := client.SendOperation(context.Background(), op)
-	if err != nil {
-		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndGetFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckAndGetFailed,
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to check path and filename for add operation, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
+		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckArgs4AddFailed,
 			Msg:  err.Error(),
 		})
 		return nil, details.Err()
 	}
+	logrus.WithContext(ctx).Infof("Success to check path and filename for add operation from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
+	return (response.Response).(*pb.CheckArgs4AddReply), nil
 
-	fileNode, err := DoCheckArgs4Get(args.Path)
-	if err != nil {
+}
+
+// CheckAndGet called by client
+// check get args and get the FileNode according to path
+func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAndGetArgs) (*pb.CheckAndGetReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for getting fileNode for path, Path: %s", args.Path)
+	operation := &GetOperation{
+		Id:    util.GenerateUUIDString(),
+		Path:  args.Path,
+		Stage: common.CheckArgs,
+	}
+	data := getData4Apply(operation, common.OperationGet)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to get dataNode for get operation, error code: %v, error detail: %s", common.MasterCheckAndGetFailed, err)
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndGetFailed,
@@ -353,11 +346,22 @@ func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAnd
 		})
 		return nil, details.Err()
 	}
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to get dataNode for get operation, error code: %v, error detail: %s", common.MasterCheckAndGetFailed, err)
+		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndGetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	fileNode := response.Response.(*FileNode)
 	rep := &pb.CheckAndGetReply{
 		FileNodeId:  fileNode.Id,
 		ChunkNum:    int32(len(fileNode.Chunks)),
-		OperationId: op.Uuid,
+		OperationId: operation.Id,
 	}
+	logrus.WithContext(ctx).Infof("Success to check path for get operation from client, path: %s", args.Path)
 	return rep, nil
 }
 
@@ -365,8 +369,15 @@ func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAnd
 // Allocate some DataNode to store a Chunk and select the primary DataNode
 func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.GetDataNodes4AddArgs) (*pb.GetDataNodes4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for getting dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
-	dataNodes, primaryNode, err := DoGetDataNodes4Add(args.FileNodeId, args.ChunkIndex)
-	if err != nil {
+	operation := &AddOperation{
+		Id:         util.GenerateUUIDString(),
+		FileNodeId: args.FileNodeId,
+		ChunkIndex: args.ChunkIndex,
+		Stage:      common.GetDataNodes,
+	}
+	data := getData4Apply(operation, common.OperationAdd)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to get dataNodes for single chunk for add operation, error code: %v, error detail: %s,", common.MasterGetDataNodes4AddFailed, err.Error())
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterGetDataNodes4AddFailed,
@@ -374,20 +385,32 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 		})
 		return nil, details.Err()
 	}
-	rep := &pb.GetDataNodes4AddReply{
-		DataNodes:   dataNodes,
-		PrimaryNode: primaryNode,
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to get dataNodes for single chunk for add operation, error code: %v, error detail: %s,", common.MasterGetDataNodes4AddFailed, err.Error())
+		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterGetDataNodes4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
 	}
-	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk for add operation, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
-	return rep, nil
+	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
+	return (response.Response).(*pb.GetDataNodes4AddReply), nil
 }
 
 // GetDataNodes4Get called by client
 // find the dataNodes for the specified chunkId
 func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.GetDataNodes4GetArgs) (*pb.GetDataNodes4GetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for getting data node, FileNodeId: %s", args.FileNodeId)
-	dataNodeIds, dataNodeAddrs, err := DoGetDataNodes4Get(args.FileNodeId, args.ChunkIndex)
-	if err != nil {
+	operation := &GetOperation{
+		Id:         util.GenerateUUIDString(),
+		FileNodeId: args.FileNodeId,
+		ChunkIndex: args.ChunkIndex,
+		Stage:      common.GetDataNodes,
+	}
+	data := getData4Apply(operation, common.OperationGet)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to get dataNodes for get operation, error code: %v, error detail: %s,", common.MasterGetDataNodes4GetFailed, err.Error())
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterGetDataNodes4GetFailed,
@@ -395,52 +418,31 @@ func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.Get
 		})
 		return nil, details.Err()
 	}
-	rep := &pb.GetDataNodes4GetReply{
-		DataNodeIds:   dataNodeIds,
-		DataNodeAddrs: dataNodeAddrs,
-		ChunkIndex:    args.ChunkIndex,
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to get dataNodes for get operation, error code: %v, error detail: %s,", common.MasterGetDataNodes4GetFailed, err.Error())
+		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterGetDataNodes4GetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
 	}
 	logrus.WithContext(ctx).Infof("Success to get dataNodes for get operation, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
-	return rep, nil
-}
-
-// UnlockDic4Add Called by client.
-// Unlock all FileNode in the target path which is used to add file.
-func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.UnlockDic4AddArgs) (*pb.UnlockDic4AddReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for unlocking FileNodes in the target path from client, FileNodeId: %s", args.FileNodeId)
-	err := DoUnlockDic4Add(args.FileNodeId, false)
-	if err != nil {
-		logrus.Errorf("Fail to unlock FileNodes in the target path, error code: %v, error detail: %s,", common.MasterUnlockDic4AddFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterUnlockDic4AddFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-	client := pb.NewSendOperationServiceClient(handler.ClientCon)
-	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
-		Uuid:     args.OperationUuid,
-		IsFinish: true,
-	})
-	if err != nil {
-		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterFinishOperationFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterGetDataNodes4AddFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-	rep := &pb.UnlockDic4AddReply{}
-	logrus.WithContext(ctx).Infof("Success to unlock FileNodes in the target path, FileNodeId: %s", args.FileNodeId)
-	return rep, nil
+	return (response.Response).(*pb.GetDataNodes4GetReply), nil
 }
 
 // ReleaseLease4Add Called by client.
 // Release the lease of a chunk.
 func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.ReleaseLease4AddArgs) (*pb.ReleaseLease4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
-	err := DoReleaseLease(args.ChunkId)
-	if err != nil {
+	operation := &AddOperation{
+		Id:      util.GenerateUUIDString(),
+		ChunkId: args.ChunkId,
+		Stage:   common.ReleaseLease,
+	}
+	data := getData4Apply(operation, common.OperationAdd)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4AddFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterReleaseLease4AddFailed,
@@ -448,6 +450,16 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 		})
 		return nil, details.Err()
 	}
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4AddFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterReleaseLease4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
 	rep := &pb.ReleaseLease4AddReply{}
 	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
 	return rep, nil
@@ -458,8 +470,14 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 // Release the lease of a chunk.
 func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.ReleaseLease4GetArgs) (*pb.ReleaseLease4GetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
-	err := DoReleaseLease(args.ChunkId)
-	if err != nil {
+	operation := &GetOperation{
+		Id:      util.GenerateUUIDString(),
+		ChunkId: args.ChunkId,
+		Stage:   common.ReleaseLease,
+	}
+	data := getData4Apply(operation, common.OperationGet)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4GetFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterReleaseLease4GetFailed,
@@ -467,8 +485,52 @@ func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.Rel
 		})
 		return nil, details.Err()
 	}
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4GetFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterReleaseLease4GetFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
 	rep := &pb.ReleaseLease4GetReply{}
 	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
+	return rep, nil
+}
+
+// UnlockDic4Add Called by client.
+// Unlock all FileNode in the target path which is used to add file.
+func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.UnlockDic4AddArgs) (*pb.UnlockDic4AddReply, error) {
+	logrus.WithContext(ctx).Infof("Get request for unlocking FileNodes in the target path from client, FileNodeId: %s", args.FileNodeId)
+	operation := &AddOperation{
+		Id:         util.GenerateUUIDString(),
+		FileNodeId: args.FileNodeId,
+		Stage:      common.UnlockDic,
+	}
+	data := getData4Apply(operation, common.OperationAdd)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
+		logrus.Errorf("Fail to unlock FileNodes in the target path, error code: %v, error detail: %s,", common.MasterUnlockDic4AddFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterUnlockDic4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to unlock FileNodes in the target path, error code: %v, error detail: %s,", common.MasterUnlockDic4AddFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterUnlockDic4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
+	rep := &pb.UnlockDic4AddReply{}
+	logrus.WithContext(ctx).Infof("Success to unlock FileNodes in the target path, FileNodeId: %s", args.FileNodeId)
 	return rep, nil
 }
 
@@ -478,17 +540,21 @@ func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckA
 	logrus.WithContext(ctx).Infof("Get request for checking args and make directory at target path from client, path: %s, dirName: %s", args.Path, args.DirName)
 	operation := &MkdirOperation{
 		Id:       util.GenerateUUIDString(),
-		Des:      args.Path,
+		Path:     args.Path,
 		FileName: args.DirName,
 	}
-	operationBytes, _ := json.Marshal(operation)
-	opContainer := OpContainer{
-		OpType: common.OperationMkdir,
-		OpData: operationBytes,
-	}
-	data, _ := json.Marshal(opContainer)
+	data := getData4Apply(operation, common.OperationMkdir)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
 	if err := applyFuture.Error(); err != nil {
+		logrus.Errorf("Fail to check args and make directory at target path, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckAndMkdirFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to check args and make directory at target path, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndMkdirFailed,
@@ -506,20 +572,14 @@ func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckA
 // Check args and move directory or file to target path.
 func (handler *MasterHandler) CheckAndMove(ctx context.Context, args *pb.CheckAndMoveArgs) (*pb.CheckAndMoveReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and move directory or file to target path from client, sourcePath: %s, targetPath: %s", args.SourcePath, args.TargetPath)
-	client := pb.NewSendOperationServiceClient(handler.ClientCon)
-	op := OperationMove(args.SourcePath, args.TargetPath)
-	_, err := client.SendOperation(context.Background(), op)
-	if err != nil {
-		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndMoveFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckAndMoveFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
+	operation := &MoveOperation{
+		Id:         util.GenerateUUIDString(),
+		SourcePath: args.SourcePath,
+		TargetPath: args.TargetPath,
 	}
-
-	err = DoCheckAndMove(args.SourcePath, args.TargetPath)
-	if err != nil {
+	data := getData4Apply(operation, common.OperationMove)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to check args and move directory or file to target path, error code: %v, error detail: %s,", common.MasterCheckAndMoveFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndMoveFailed,
@@ -527,15 +587,10 @@ func (handler *MasterHandler) CheckAndMove(ctx context.Context, args *pb.CheckAn
 		})
 		return nil, details.Err()
 	}
-
-	client = pb.NewSendOperationServiceClient(handler.ClientCon)
-	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
-		Uuid:     op.Uuid,
-		IsFinish: true,
-	})
-	if err != nil {
-		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterCheckAndMoveFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to check args and move directory or file to target path, error code: %v, error detail: %s,", common.MasterCheckAndMoveFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndMoveFailed,
 			Msg:  err.Error(),
 		})
@@ -551,35 +606,23 @@ func (handler *MasterHandler) CheckAndMove(ctx context.Context, args *pb.CheckAn
 // Check args and remove directory or file at target path.
 func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.CheckAndRemoveArgs) (*pb.CheckAndRemoveReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and remove directory or file at target path from client, path: %s", args.Path)
-	client := pb.NewSendOperationServiceClient(handler.ClientCon)
-	op := OperationRemove(args.Path)
-	_, err := client.SendOperation(context.Background(), op)
-	if err != nil {
-		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndRemoveFailed, err.Error())
+	operation := &RemoveOperation{
+		Id:   util.GenerateUUIDString(),
+		Path: args.Path,
+	}
+	data := getData4Apply(operation, common.OperationRemove)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
+		logrus.Errorf("Fail to check args and remove directory or file at target path, error code: %v, error detail: %s,", common.MasterCheckAndRemoveFailed, err.Error())
 		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndRemoveFailed,
 			Msg:  err.Error(),
 		})
 		return nil, details.Err()
 	}
-
-	err = DoCheckAndRemove(args.Path)
-	if err != nil {
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to check args and remove directory or file at target path, error code: %v, error detail: %s,", common.MasterCheckAndRemoveFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckAndRemoveFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-
-	client = pb.NewSendOperationServiceClient(handler.ClientCon)
-	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
-		Uuid:     op.Uuid,
-		IsFinish: true,
-	})
-	if err != nil {
-		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterCheckAndRemoveFailed, err.Error())
 		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndRemoveFailed,
 			Msg:  err.Error(),
@@ -596,40 +639,32 @@ func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.Check
 // Check args and ls the specified directory.
 func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAndListArgs) (*pb.CheckAndListReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and list the specified directory, path: %s", args.Path)
-	client := pb.NewSendOperationServiceClient(handler.ClientCon)
-	op := OperationList(args.Path)
-	_, err := client.SendOperation(context.Background(), op)
-	if err != nil {
-		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndListFailed, err.Error())
+	operation := &ListOperation{
+		Id:   util.GenerateUUIDString(),
+		Path: args.Path,
+	}
+	data := getData4Apply(operation, common.OperationList)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
+		logrus.Errorf("Fail to check args and list specified directory, error code: %v, error detail: %s,", common.MasterCheckAndListFailed, err.Error())
 		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndListFailed,
 			Msg:  err.Error(),
 		})
 		return nil, details.Err()
 	}
-
-	infos, err := DoCheckAndList(args.Path)
-	if err != nil {
-		logrus.Errorf("Fail to check args and list the specified directory, error code: %v, error detail: %s,", common.MasterCheckAndRemoveFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckAndRemoveFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
-		Uuid:     op.Uuid,
-		IsFinish: true,
-	})
-	if err != nil {
-		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterCheckAndListFailed, err.Error())
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to check args and list specified directory, error code: %v, error detail: %s,", common.MasterCheckAndListFailed, err.Error())
 		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndListFailed,
 			Msg:  err.Error(),
 		})
 		return nil, details.Err()
 	}
-	rep := &pb.CheckAndListReply{Files: FileNode2FileInfo(infos)}
+	rep := &pb.CheckAndListReply{
+		Files: (response.Response).([]*pb.FileInfo),
+	}
 	logrus.WithContext(ctx).Infof("Success to check args and list specified directory, path: %s", args.Path)
 	return rep, nil
 }
@@ -638,20 +673,13 @@ func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAn
 // Check args and return the specified file info.
 func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAndStatArgs) (*pb.CheckAndStatReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and get the specified file info, path: %s", args.Path)
-	client := pb.NewSendOperationServiceClient(handler.ClientCon)
-	op := OperationStat(args.Path)
-	_, err := client.SendOperation(context.Background(), op)
-	if err != nil {
-		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckAndStatFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
+	operation := &StatOperation{
+		Id:   util.GenerateUUIDString(),
+		Path: args.Path,
 	}
-
-	info, err := DoCheckAndStat(args.Path)
-	if err != nil {
+	data := getData4Apply(operation, common.OperationStat)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to check args and get the specified file info, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndStatFailed,
@@ -659,19 +687,16 @@ func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAn
 		})
 		return nil, details.Err()
 	}
-	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
-		Uuid:     op.Uuid,
-		IsFinish: true,
-	})
-	if err != nil {
-		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to check args and get the specified file info, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndStatFailed,
 			Msg:  err.Error(),
 		})
 		return nil, details.Err()
 	}
-
+	info := (response.Response).(*FileNode)
 	rep := &pb.CheckAndStatReply{
 		FileName: info.FileName,
 		IsFile:   info.IsFile,
@@ -685,20 +710,14 @@ func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAn
 // Check args and rename the specified file to a new name.
 func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.CheckAndRenameArgs) (*pb.CheckAndRenameReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and rename the specified file to a new name, path: %s, new name: %s", args.Path, args.NewName)
-	client := pb.NewSendOperationServiceClient(handler.ClientCon)
-	op := OperationRename(args.Path, args.NewName)
-	_, err := client.SendOperation(context.Background(), op)
-	if err != nil {
-		logrus.Errorf("Fail to store opertion in the file, error code: %v, error detail: %s,", common.MasterCheckAndRenameFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckAndRenameFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
+	operation := &RenameOperation{
+		Id:      util.GenerateUUIDString(),
+		Path:    args.Path,
+		NewName: args.NewName,
 	}
-
-	err = DoCheckAndRename(args.Path, args.NewName)
-	if err != nil {
+	data := getData4Apply(operation, common.OperationRename)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to check args and rename the specified file to a new name, error code: %v, error detail: %s,", common.MasterCheckAndRenameFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndRenameFailed,
@@ -706,13 +725,10 @@ func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.Check
 		})
 		return nil, details.Err()
 	}
-	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
-		Uuid:     op.Uuid,
-		IsFinish: true,
-	})
-	if err != nil {
-		logrus.Errorf("Finish Opeartion Failed, error code: %v, error detail: %s,", common.MasterCheckAndRenameFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to check args and rename the specified file to a new name, error code: %v, error detail: %s,", common.MasterCheckAndRenameFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndRenameFailed,
 			Msg:  err.Error(),
 		})
@@ -744,4 +760,14 @@ func (handler *MasterHandler) Server() {
 	pb.RegisterRaftServiceServer(server, handler)
 	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
 	server.Serve(listener)
+}
+
+func getData4Apply(operation Operation, opType string) []byte {
+	operationBytes, _ := json.Marshal(operation)
+	opContainer := OpContainer{
+		OpType: opType,
+		OpData: operationBytes,
+	}
+	data, _ := json.Marshal(opContainer)
+	return data
 }
