@@ -643,18 +643,8 @@ func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAn
 		Id:   util.GenerateUUIDString(),
 		Path: args.Path,
 	}
-	data := getData4Apply(operation, common.OperationList)
-	applyFuture := handler.Raft.Apply(data, 5*time.Second)
-	if err := applyFuture.Error(); err != nil {
-		logrus.Errorf("Fail to check args and list specified directory, error code: %v, error detail: %s,", common.MasterCheckAndListFailed, err.Error())
-		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckAndListFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-	response := (applyFuture.Response()).(ApplyResponse)
-	if err := response.Error; err != nil {
+	response, err := operation.Apply()
+	if err != nil {
 		logrus.Errorf("Fail to check args and list specified directory, error code: %v, error detail: %s,", common.MasterCheckAndListFailed, err.Error())
 		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndListFailed,
@@ -663,7 +653,7 @@ func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAn
 		return nil, details.Err()
 	}
 	rep := &pb.CheckAndListReply{
-		Files: (response.Response).([]*pb.FileInfo),
+		Files: response.([]*pb.FileInfo),
 	}
 	logrus.WithContext(ctx).Infof("Success to check args and list specified directory, path: %s", args.Path)
 	return rep, nil
@@ -677,9 +667,8 @@ func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAn
 		Id:   util.GenerateUUIDString(),
 		Path: args.Path,
 	}
-	data := getData4Apply(operation, common.OperationStat)
-	applyFuture := handler.Raft.Apply(data, 5*time.Second)
-	if err := applyFuture.Error(); err != nil {
+	response, err := operation.Apply()
+	if err != nil {
 		logrus.Errorf("Fail to check args and get the specified file info, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndStatFailed,
@@ -687,16 +676,7 @@ func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAn
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
-	if err := response.Error; err != nil {
-		logrus.Errorf("Fail to check args and get the specified file info, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterCheckAndStatFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-	info := (response.Response).(*FileNode)
+	info := response.(*FileNode)
 	rep := &pb.CheckAndStatReply{
 		FileName: info.FileName,
 		IsFile:   info.IsFile,
