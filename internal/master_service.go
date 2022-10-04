@@ -13,11 +13,9 @@ import (
 	"google.golang.org/grpc/peer"
 	"io"
 	"reflect"
-	"strconv"
 	"strings"
 	"time"
 	"tinydfs-base/common"
-	"tinydfs-base/protocol/pb"
 )
 
 const (
@@ -158,76 +156,4 @@ func DoHeartbeat(Id string) error {
 		return nil
 	}
 	return fmt.Errorf("datanode %s not exist", Id)
-}
-
-func DoCheckArgs4Add(args *pb.CheckArgs4AddArgs) (string, int32, error) {
-	fileNode, stack, err := LockAndAddFileNode(args.Path, args.FileName, args.Size, isFile4File)
-	fileNodesMapLock.Lock()
-	lockedFileNodes[fileNode.Id] = stack
-	fileNodesMapLock.Unlock()
-	if err != nil {
-		return "", 0, err
-	}
-	return fileNode.Id, int32(len(fileNode.Chunks)), nil
-}
-
-func DoGetDataNodes4Add(fileNodeId string, chunkIndex int32) ([]string, string, error) {
-	chunkId := fileNodeId + common.ChunkIdDelimiter + strconv.Itoa(int(chunkIndex))
-	dataNodes, primaryNode := AllocateDataNodes()
-	var (
-		dataNodeIds   = make([]string, len(dataNodes))
-		dataNodeAddrs = make([]string, len(dataNodes))
-	)
-	for i, node := range dataNodes {
-		node.Chunks.Add(chunkId)
-		dataNodeIds[i] = node.Id
-		dataNodeAddrs[i] = node.Address
-	}
-	primaryNode.Leases.Add(chunkId)
-
-	chunk := &Chunk{
-		Id:          chunkId,
-		dataNodes:   dataNodeIds,
-		primaryNode: primaryNode.Id,
-	}
-	AddChunk(chunk)
-	return dataNodeAddrs, primaryNode.Address, nil
-}
-
-func DoCheckArgs4Get(path string) (*FileNode, error) {
-	fileNode, err := CheckAndGetFileNode(path)
-	if err != nil {
-		return nil, err
-	}
-	return fileNode, nil
-}
-
-func DoGetDataNodes4Get(fileNodeId string, chunkIndex int32) ([]string, []string, error) {
-	chunkId := fileNodeId + common.ChunkIdDelimiter + strconv.FormatInt(int64(chunkIndex), 10)
-	chunk := GetChunk(chunkId)
-	dataNodeIds := make([]string, len(chunk.dataNodes))
-	dataNodeAddrs := make([]string, len(chunk.dataNodes))
-	for i, nodeId := range chunk.dataNodes {
-		dataNode := GetDataNode(nodeId)
-		dataNodeIds[i] = dataNode.Id
-		dataNodeAddrs[i] = dataNode.Address
-	}
-	return dataNodeIds, dataNodeAddrs, nil
-}
-
-func DoUnlockDic4Add(fileNodeId string, isRead bool) error {
-	err := UnlockFileNodesById(fileNodeId, isRead)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func DoReleaseLease(chunkId string) error {
-	chunk := GetChunk(chunkId)
-	err := ReleaseLease(chunk.primaryNode, chunkId)
-	if err != nil {
-		return err
-	}
-	return nil
 }
