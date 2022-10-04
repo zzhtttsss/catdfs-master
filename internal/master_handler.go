@@ -61,6 +61,9 @@ func CreateMasterHandler() {
 		Endpoints:   []string{viper.GetString(common.EtcdEndPoint)},
 		DialTimeout: 5 * time.Second,
 	})
+	if err != nil {
+		logrus.Panicf("Fail to get etcd client, error detail : %s", err.Error())
+	}
 	err = GlobalMasterHandler.initRaft()
 	if err != nil {
 		logrus.Panicf("Fail to init raft, error detail : %s", err.Error())
@@ -159,7 +162,7 @@ func (handler *MasterHandler) BootstrapOrJoinCluster() error {
 		}
 	} else {
 		logrus.Infof("Already have cluster, start to join cluster")
-		_, err := handler.joinCluster(&pb.JoinClusterArgs{})
+		_, err := handler.joinCluster(getResp)
 		if err != nil {
 			logrus.Errorf("Fail to join cluster, error detail: %s", err.Error())
 			return err
@@ -170,18 +173,13 @@ func (handler *MasterHandler) BootstrapOrJoinCluster() error {
 
 // joinCluster Called by follower.
 // Join itself to the cluster.
-func (handler *MasterHandler) joinCluster(args *pb.JoinClusterArgs) (*pb.JoinClusterReply, error) {
+func (handler *MasterHandler) joinCluster(getResp *clientv3.GetResponse) (*pb.JoinClusterReply, error) {
 	ctx := context.Background()
-	kv := clientv3.NewKV(GlobalMasterHandler.EtcdClient)
-	getResp, err := kv.Get(ctx, common.LeaderAddressKey)
-	if err != nil {
-		logrus.Errorf("Fail to get key-value when join cluster, error deatil: %s", err.Error())
-	}
 	addr := string(getResp.Kvs[0].Value)
 	addr = strings.Split(addr, common.AddressDelimiter)[0] + viper.GetString(common.MasterPort)
 	conn, _ := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	client := pb.NewRaftServiceClient(conn)
-	reply, err := client.JoinCluster(ctx, args)
+	reply, err := client.JoinCluster(ctx, &pb.JoinClusterArgs{})
 	if err != nil {
 		logrus.Errorf("Fail to join cluster, error detail : %s", err.Error())
 	}
