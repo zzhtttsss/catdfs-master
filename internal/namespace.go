@@ -161,7 +161,7 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 	return newNode, nil
 }
 
-func LockAndAddFileNode(path string, filename string, size int64, isFile bool) (*FileNode, *list.List, error) {
+func LockAndAddFileNode(id string, path string, filename string, size int64, isFile bool) (*FileNode, *list.List, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
 	if !isExist {
 		return nil, nil, fmt.Errorf("path not exist, path : %s", path)
@@ -170,8 +170,6 @@ func LockAndAddFileNode(path string, filename string, size int64, isFile bool) (
 	if _, ok := fileNode.ChildNodes[filename]; ok {
 		return nil, nil, fmt.Errorf("target path already has file with the same name, path : %s", path)
 	}
-
-	id := util.GenerateUUIDString()
 	newNode := &FileNode{
 		Id:             id,
 		FileName:       filename,

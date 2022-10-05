@@ -4,7 +4,6 @@ go 1.18
 
 require (
 	github.com/deckarep/golang-set v1.8.0
-	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-hclog v1.2.0
 	github.com/hashicorp/raft v1.3.10
 	github.com/hashicorp/raft-boltdb v0.0.0-20220329195025-15018e9b97e0
@@ -26,6 +25,7 @@ require (
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
+	github.com/google/uuid v1.3.0 // indirect
 	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
 	github.com/hashicorp/go-msgpack v0.5.5 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
@@ -57,6 +57,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.0 // indirect
 )
 
-//replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20220930051116-51518754f771
+replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20221005072137-0fc2f6cd6204
 
-replace tinydfs-base => ../tinydfs-base
+//replace tinydfs-base => ../tinydfs-base

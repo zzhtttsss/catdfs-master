@@ -1,8 +1,10 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	mapset "github.com/deckarep/golang-set"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"sync"
 	"time"
@@ -25,9 +27,25 @@ type DataNode struct {
 	// id of all Chunk stored in this DataNode.
 	Chunks mapset.Set
 	// id of all Chunk that primary DataNode is this DataNode.
-	Leases    mapset.Set
-	waitTimer *time.Timer
-	dieTimer  *time.Timer
+	Leases        mapset.Set
+	HeartbeatTime time.Time
+}
+
+// MonitorHeartbeat Run in a goroutine.
+// This function will monitor heartbeat of all DataNode. It will scan dataNodeMap every once in a while and change the
+// status of DataNode which with no heartbeat for ten minutes.
+func MonitorHeartbeat(ctx context.Context) {
+	for {
+		updateMapLock.Lock()
+		for _, node := range dataNodeMap {
+			if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) {
+				node.status = common.Died
+			}
+		}
+		updateMapLock.Unlock()
+		logrus.WithContext(ctx).Infof("Complete a round of check, time: %s", time.Now().String())
+		time.Sleep(time.Duration(viper.GetInt(common.MasterCheckTime)) * time.Second)
+	}
 }
 
 // DataNodeHeap Max heap with capacity "ReplicaNum". It is used to store the first "ReplicaNum" dataNodes

@@ -74,7 +74,7 @@ func CreateMasterHandler() {
 func (handler *MasterHandler) initRaft() error {
 	raftConfig := raft.DefaultConfig()
 	raftConfig.SnapshotInterval = 20 * time.Second
-	raftConfig.SnapshotThreshold = 128
+	//raftConfig.SnapshotThreshold = 128
 	raftConfig.Logger = hclog.L()
 
 	localIP, err := util.GetLocalIP()
@@ -86,7 +86,8 @@ func (handler *MasterHandler) initRaft() error {
 
 	handler.MonitorChan = make(chan bool, 1)
 	raftConfig.NotifyCh = handler.MonitorChan
-	go handler.monitorCluster()
+	ctx := context.Background()
+	go handler.monitorCluster(ctx)
 
 	addr, err := net.ResolveTCPAddr(common.TCP, handler.raftAddress)
 	if err != nil {
@@ -177,6 +178,7 @@ func (handler *MasterHandler) joinCluster(getResp *clientv3.GetResponse) (*pb.Jo
 	ctx := context.Background()
 	addr := string(getResp.Kvs[0].Value)
 	addr = strings.Split(addr, common.AddressDelimiter)[0] + viper.GetString(common.MasterPort)
+	logrus.Infof("leader address is: %s", addr)
 	conn, _ := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	client := pb.NewRaftServiceClient(conn)
 	reply, err := client.JoinCluster(ctx, &pb.JoinClusterArgs{})
@@ -219,23 +221,31 @@ func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClus
 
 // monitorCluster Run in a goroutine.
 // This function will monitor the change of current master's state (leader -> follower, follower -> leader).
-// When current master become the leader of the cluster, it will change leader address in etcd and add an observer to
-// observe follower state.
-func (handler *MasterHandler) monitorCluster() {
+// When current master become the leader of the cluster, it will:
+// 1. change leader address in etcd.
+// 2. register an observer to observe follower state.
+// 3. monitor heartbeat of all DataNode in a goroutine.
+// When current master become the follower of the cluster, it will:
+// 1. deregister the observer which observes follower state.
+// 2. use cancel function to stop the goroutine which monitors heartbeat.
+func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 	for {
+		subContext, cancel := context.WithCancel(ctx)
 		select {
 		case isLeader := <-handler.MonitorChan:
 			if isLeader {
 				kv := clientv3.NewKV(handler.EtcdClient)
-				_, err := kv.Put(context.Background(), common.LeaderAddressKey, handler.raftAddress)
+				_, err := kv.Put(ctx, common.LeaderAddressKey, handler.raftAddress)
 				if err != nil {
 					logrus.Errorf("Fail to put kv when leader change")
 				}
 				handler.FollowerStateObserver = getFollowerStateObserver()
 				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
-				logrus.Infof("Become leader, success to change etcd leader infomation")
+				go MonitorHeartbeat(subContext)
+				logrus.Infof("Become leader, success to change etcd leader infomation and monitor datanodes")
 			} else {
 				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
+				cancel()
 				logrus.Infof("Become follower")
 			}
 		}
@@ -257,26 +267,19 @@ func getFollowerStateObserver() *raft.Observer {
 	return raft.NewObserver(observerChan, false, filterFn)
 }
 
-// Heartbeat 由Chunkserver调用该方法，维持心跳
-func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
-	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
-	err := DoHeartbeat(args.Id)
-	if err != nil {
-		logrus.Errorf("Fail to heartbeat, error code: %v, error detail: %s,", common.MasterHeartbeatFailed, err.Error())
-		details, _ := status.New(codes.NotFound, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterHeartbeatFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-	rep := &pb.HeartbeatReply{}
-	return rep, nil
-}
-
 // Register 由Chunkserver调用该方法，将对应DataNode注册到本NameNode上
 func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterArgs) (*pb.DNRegisterReply, error) {
-	id, err := DoRegister(ctx)
-	if err != nil {
+	p, _ := peer.FromContext(ctx)
+	address := strings.Split(p.Addr.String(), ":")[0]
+	logrus.WithContext(ctx).Infof("Get request for registering a datanode from chunkserver, address: %s", address)
+	operation := &RegisterOperation{
+		Id:         util.GenerateUUIDString(),
+		Address:    address,
+		DataNodeId: util.GenerateUUIDString(),
+	}
+	data := getData4Apply(operation, common.OperationRegister)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
 		logrus.Errorf("Fail to register, error code: %v, error detail: %s,", common.MasterRegisterFailed, err.Error())
 		details, _ := status.New(codes.NotFound, "").WithDetails(&pb.RPCError{
 			Code: common.MasterRegisterFailed,
@@ -284,9 +287,51 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		})
 		return nil, details.Err()
 	}
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to register, error code: %v, error detail: %s,", common.MasterRegisterFailed, err.Error())
+		details, _ := status.New(codes.NotFound, "").WithDetails(&pb.RPCError{
+			Code: common.MasterRegisterFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	id := response.Response.(string)
 	rep := &pb.DNRegisterReply{
 		Id: id,
 	}
+	logrus.WithContext(ctx).Infof("Success to register a datanode from chunkserver, address: %s, id: %s", address, id)
+	return rep, nil
+}
+
+// Heartbeat 由Chunkserver调用该方法，维持心跳
+func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
+	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
+	operation := &HeartbeatOperation{
+		Id:         util.GenerateUUIDString(),
+		DataNodeId: args.Id,
+	}
+	data := getData4Apply(operation, common.OperationHeartbeat)
+	applyFuture := handler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
+		logrus.Errorf("Fail to heartbeat, error code: %v, error detail: %s,", common.MasterHeartbeatFailed, err.Error())
+		details, _ := status.New(codes.NotFound, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterHeartbeatFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+	response := (applyFuture.Response()).(ApplyResponse)
+	if err := response.Error; err != nil {
+		logrus.Errorf("Fail to heartbeat, error code: %v, error detail: %s,", common.MasterHeartbeatFailed, err.Error())
+		details, _ := status.New(codes.NotFound, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterHeartbeatFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
+
+	rep := &pb.HeartbeatReply{}
 	return rep, nil
 }
 
@@ -295,11 +340,12 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
 	operation := &AddOperation{
-		Id:       util.GenerateUUIDString(),
-		Path:     args.Path,
-		FileName: args.FileName,
-		Size:     args.Size,
-		Stage:    common.CheckArgs,
+		Id:         util.GenerateUUIDString(),
+		FileNodeId: util.GenerateUUIDString(),
+		Path:       args.Path,
+		FileName:   args.FileName,
+		Size:       args.Size,
+		Stage:      common.CheckArgs,
 	}
 	data := getData4Apply(operation, common.OperationAdd)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)

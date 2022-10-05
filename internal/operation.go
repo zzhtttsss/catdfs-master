@@ -1,13 +1,13 @@
 package internal
 
 import (
-	"bufio"
 	"encoding/json"
-	"io"
+	"fmt"
+	set "github.com/deckarep/golang-set"
+	"github.com/sirupsen/logrus"
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
@@ -31,6 +31,10 @@ var (
 )
 
 func init() {
+	OperationTypes[common.OperationRegister] = reflect.TypeOf(RegisterOperation{})
+	OperationTypes[common.OperationHeartbeat] = reflect.TypeOf(HeartbeatOperation{})
+	OperationTypes[common.OperationAdd] = reflect.TypeOf(AddOperation{})
+	OperationTypes[common.OperationGet] = reflect.TypeOf(GetOperation{})
 	OperationTypes[common.OperationMkdir] = reflect.TypeOf(MkdirOperation{})
 	OperationTypes[common.OperationMove] = reflect.TypeOf(MoveOperation{})
 	OperationTypes[common.OperationRemove] = reflect.TypeOf(RemoveOperation{})
@@ -48,6 +52,43 @@ type OpContainer struct {
 	OpData json.RawMessage `json:"op_data"`
 }
 
+type RegisterOperation struct {
+	Id         string `json:"id"`
+	Address    string `json:"address"`
+	DataNodeId string `json:"data_node_id"`
+}
+
+func (o RegisterOperation) Apply() (interface{}, error) {
+	logrus.Infof("register, address: %s", o.Address)
+	datanode := &DataNode{
+		Id:            o.DataNodeId,
+		status:        common.Alive,
+		Address:       o.Address,
+		Chunks:        set.NewSet(),
+		Leases:        set.NewSet(),
+		HeartbeatTime: time.Now(),
+	}
+
+	AddDataNode(datanode)
+	Adjust4Add(datanode)
+	logrus.Infof("[Id=%s] Connected", o.DataNodeId)
+	return o.DataNodeId, nil
+}
+
+type HeartbeatOperation struct {
+	Id         string `json:"id"`
+	DataNodeId string `json:"data_node_id"`
+}
+
+func (o HeartbeatOperation) Apply() (interface{}, error) {
+	logrus.Infof("heartbeat, id: %s", o.DataNodeId)
+	if dataNode := GetDataNode(o.DataNodeId); dataNode != nil {
+		dataNode.HeartbeatTime = time.Now()
+		return nil, nil
+	}
+	return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
+}
+
 type AddOperation struct {
 	Id         string `json:"id"`
 	Path       string `json:"path"`
@@ -62,7 +103,7 @@ type AddOperation struct {
 func (o AddOperation) Apply() (interface{}, error) {
 	switch o.Stage {
 	case common.CheckArgs:
-		fileNode, stack, err := LockAndAddFileNode(o.Path, o.FileName, o.Size, common.IsFile4AddFile)
+		fileNode, stack, err := LockAndAddFileNode(o.FileNodeId, o.Path, o.FileName, o.Size, common.IsFile4AddFile)
 		fileNodesMapLock.Lock()
 		lockedFileNodes[fileNode.Id] = stack
 		fileNodesMapLock.Unlock()
@@ -157,6 +198,7 @@ type MkdirOperation struct {
 }
 
 func (o MkdirOperation) Apply() (interface{}, error) {
+	logrus.Infof("mkdir, path: %s, filename: %s", o.Path, o.FileName)
 	return AddFileNode(o.Path, o.FileName, common.DirSize, false)
 }
 
@@ -167,6 +209,7 @@ type MoveOperation struct {
 }
 
 func (o MoveOperation) Apply() (interface{}, error) {
+	logrus.Infof("move, SourcePath: %s, TargetPath: %s", o.SourcePath, o.TargetPath)
 	return MoveFileNode(o.SourcePath, o.TargetPath)
 }
 
@@ -176,6 +219,7 @@ type RemoveOperation struct {
 }
 
 func (o RemoveOperation) Apply() (interface{}, error) {
+	logrus.Infof("remove, path: %s", o.Path)
 	return RemoveFileNode(o.Path)
 }
 
@@ -185,6 +229,7 @@ type ListOperation struct {
 }
 
 func (o ListOperation) Apply() (interface{}, error) {
+	logrus.Infof("list, path: %s", o.Path)
 	fileNodes, err := ListFileNode(o.Path)
 	return fileNode2FileInfo(fileNodes), err
 }
@@ -195,6 +240,7 @@ type StatOperation struct {
 }
 
 func (o StatOperation) Apply() (interface{}, error) {
+	logrus.Infof("stat, path: %s", o.Path)
 	return StatFileNode(o.Path)
 }
 
@@ -205,6 +251,7 @@ type RenameOperation struct {
 }
 
 func (o RenameOperation) Apply() (interface{}, error) {
+	logrus.Infof("rename, path: %s, newName: %s", o.Path, o.NewName)
 	return RenameFileNode(o.Path, o.NewName)
 }
 
@@ -231,97 +278,4 @@ func (f *FileNode) getFileNodeByPath(path string) *FileNode {
 		currentNode = nextNode
 	}
 	return currentNode
-}
-
-// ReadSnapshotLines returns map whose key is the id of the filenode rather than filename
-func ReadSnapshotLines(r io.ReadCloser) map[string]*FileNode {
-	buf := bufio.NewScanner(r)
-	res := map[string]*FileNode{}
-	for buf.Scan() {
-		line := buf.Text()
-		data := strings.Split(line, "$")
-		childrenLen := len(data[childrenIdx])
-		childrenData := data[childrenIdx][1 : childrenLen-1]
-		var children map[string]*FileNode
-		if childrenData == "" {
-			children = nil
-		} else {
-			children = map[string]*FileNode{}
-			for _, childId := range strings.Split(childrenData, " ") {
-				children[childId] = &FileNode{
-					Id: childId,
-				}
-			}
-		}
-		chunksLen := len(data[chunksIdIdx])
-		chunksData := data[chunksIdIdx][1 : chunksLen-1]
-		var chunks []string
-		if chunksData == "" {
-			//TODO NPE隐患
-			chunks = nil
-		} else {
-			chunks = strings.Split(chunksData, " ")
-		}
-		size, _ := strconv.Atoi(data[sizeIdx])
-		isFile, _ := strconv.ParseBool(data[isFileIdx])
-		delTime, _ := time.Parse(common.LogFileTimeFormat, data[delTimeIdx])
-		var delTimePtr *time.Time
-		if data[delTimeIdx] == "<nil>" {
-			delTimePtr = nil
-		} else {
-			delTimePtr = &delTime
-		}
-		isDel, _ := strconv.ParseBool(data[isDelIdx])
-		lastLockTime, _ := time.Parse(common.LogFileTimeFormat, data[lastLockTimeIdx])
-		fn := &FileNode{
-			Id:       data[idIdx],
-			FileName: data[fileNameIdx],
-			ParentNode: &FileNode{
-				Id: data[parentIdIdx],
-			},
-			ChildNodes:     children,
-			Chunks:         chunks,
-			Size:           int64(size),
-			IsFile:         isFile,
-			DelTime:        delTimePtr,
-			IsDel:          isDel,
-			UpdateNodeLock: &sync.RWMutex{},
-			LastLockTime:   lastLockTime,
-		}
-		res[fn.Id] = fn
-	}
-	return res
-}
-
-// RootDeserialize reads the fsimage.txt and rebuild the directory.
-func RootDeserialize(rootMap map[string]*FileNode) *FileNode {
-	// Look for root
-	newRoot := &FileNode{}
-	for _, r := range rootMap {
-		if r.ParentNode.Id == common.MinusOneString {
-			newRoot = r
-			break
-		}
-	}
-	buildTree(newRoot, rootMap)
-	newRoot.ParentNode = nil
-	return newRoot
-}
-
-func buildTree(cur *FileNode, nodeMap map[string]*FileNode) {
-	if cur == nil {
-		return
-	}
-	// id is the key of cur.ChildNodes which is uuid
-	ids := make([]string, 0)
-	for id, _ := range cur.ChildNodes {
-		ids = append(ids, id)
-	}
-	for _, id := range ids {
-		node := nodeMap[id]
-		delete(cur.ChildNodes, id)
-		cur.ChildNodes[node.FileName] = node
-		node.ParentNode = cur
-		buildTree(node, nodeMap)
-	}
 }
