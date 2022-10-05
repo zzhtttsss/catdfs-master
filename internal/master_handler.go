@@ -61,7 +61,7 @@ func CreateMasterHandler() {
 		Endpoints:   []string{viper.GetString(common.EtcdEndPoint)},
 		DialTimeout: 5 * time.Second,
 	})
-	err = GlobalMasterHandler.initRaft()
+	//err = GlobalMasterHandler.initRaft()
 	if err != nil {
 		logrus.Panicf("Fail to init raft, error detail : %s", err.Error())
 	}
@@ -272,6 +272,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		})
 		return nil, details.Err()
 	}
+	fmt.Println(rpcCountMonitor.Desc().String())
 	rep := &pb.HeartbeatReply{}
 	return rep, nil
 }
@@ -744,6 +745,6 @@ func (handler *MasterHandler) Server() {
 	pb.RegisterMasterStatServiceServer(server, handler)
 	pb.RegisterMasterGetServiceServer(server, handler)
 	pb.RegisterRaftServiceServer(server, handler)
-	logrus.Infof("Master is running, listen on %s%s", common.LocalIP, viper.GetString(common.MasterPort))
+	logrus.Infof("Master is running, listen on %s", listener.Addr().String())
 	server.Serve(listener)
 }
