@@ -104,12 +104,12 @@ func (o AddOperation) Apply() (interface{}, error) {
 	switch o.Stage {
 	case common.CheckArgs:
 		fileNode, stack, err := LockAndAddFileNode(o.FileNodeId, o.Path, o.FileName, o.Size, common.IsFile4AddFile)
-		fileNodesMapLock.Lock()
-		lockedFileNodes[fileNode.Id] = stack
-		fileNodesMapLock.Unlock()
 		if err != nil {
 			return nil, err
 		}
+		fileNodesMapLock.Lock()
+		lockedFileNodes[fileNode.Id] = stack
+		fileNodesMapLock.Unlock()
 		rep := &pb.CheckArgs4AddReply{
 			FileNodeId: fileNode.Id,
 			ChunkNum:   int32(len(fileNode.Chunks)),

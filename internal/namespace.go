@@ -131,7 +131,7 @@ func UnlockFileNodesById(fileNodeId string, isRead bool) error {
 
 func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
-	if !isExist {
+	if !isExist || fileNode.IsFile {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
 	defer unlockAllMutex(stack, false)
@@ -163,11 +163,11 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 
 func LockAndAddFileNode(id string, path string, filename string, size int64, isFile bool) (*FileNode, *list.List, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
-	if !isExist {
+	if !isExist || fileNode.IsFile {
 		return nil, nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-
 	if _, ok := fileNode.ChildNodes[filename]; ok {
+		unlockAllMutex(stack, false)
 		return nil, nil, fmt.Errorf("target path already has file with the same name, path : %s", path)
 	}
 	newNode := &FileNode{

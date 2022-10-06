@@ -287,7 +287,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to register, error code: %v, error detail: %s,", common.MasterRegisterFailed, err.Error())
 		details, _ := status.New(codes.NotFound, "").WithDetails(&pb.RPCError{
@@ -321,7 +321,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to heartbeat, error code: %v, error detail: %s,", common.MasterHeartbeatFailed, err.Error())
 		details, _ := status.New(codes.NotFound, err.Error()).WithDetails(&pb.RPCError{
@@ -357,7 +357,7 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to check path and filename for add operation, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
@@ -390,7 +390,7 @@ func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAnd
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to get dataNode for get operation, error code: %v, error detail: %s", common.MasterCheckAndGetFailed, err)
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
@@ -429,7 +429,7 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to get dataNodes for single chunk for add operation, error code: %v, error detail: %s,", common.MasterGetDataNodes4AddFailed, err.Error())
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
@@ -462,7 +462,7 @@ func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.Get
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to get dataNodes for get operation, error code: %v, error detail: %s,", common.MasterGetDataNodes4GetFailed, err.Error())
 		details, _ := status.New(codes.InvalidArgument, err.Error()).WithDetails(&pb.RPCError{
@@ -494,7 +494,7 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4AddFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
@@ -529,7 +529,7 @@ func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.Rel
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4GetFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
@@ -563,7 +563,7 @@ func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.Unlock
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to unlock FileNodes in the target path, error code: %v, error detail: %s,", common.MasterUnlockDic4AddFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
@@ -597,7 +597,7 @@ func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckA
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to check args and make directory at target path, error code: %v, error detail: %s,", common.MasterCheckAndMkdirFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
@@ -631,7 +631,7 @@ func (handler *MasterHandler) CheckAndMove(ctx context.Context, args *pb.CheckAn
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to check args and move directory or file to target path, error code: %v, error detail: %s,", common.MasterCheckAndMoveFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
@@ -664,7 +664,7 @@ func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.Check
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to check args and remove directory or file at target path, error code: %v, error detail: %s,", common.MasterCheckAndRemoveFailed, err.Error())
 		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
@@ -749,7 +749,7 @@ func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.Check
 		})
 		return nil, details.Err()
 	}
-	response := (applyFuture.Response()).(ApplyResponse)
+	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
 		logrus.Errorf("Fail to check args and rename the specified file to a new name, error code: %v, error detail: %s,", common.MasterCheckAndRenameFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{

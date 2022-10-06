@@ -27,7 +27,7 @@ type MasterFSM struct {
 func (ms MasterFSM) Apply(l *raft.Log) interface{} {
 	operation := ConvBytes2Operation(l.Data)
 	response, err := operation.Apply()
-	return ApplyResponse{
+	return &ApplyResponse{
 		Response: response,
 		Error:    err,
 	}
