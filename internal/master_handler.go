@@ -61,7 +61,7 @@ func CreateMasterHandler() {
 		Endpoints:   []string{viper.GetString(common.EtcdEndPoint)},
 		DialTimeout: 5 * time.Second,
 	})
-	//err = GlobalMasterHandler.initRaft()
+	err = GlobalMasterHandler.initRaft()
 	if err != nil {
 		logrus.Panicf("Fail to init raft, error detail : %s", err.Error())
 	}
