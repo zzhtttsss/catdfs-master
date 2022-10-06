@@ -262,7 +262,7 @@ func getFollowerStateObserver() *raft.Observer {
 // Heartbeat 由Chunkserver调用该方法，维持心跳
 func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
 	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
-	err := DoHeartbeat(args.Id)
+	err := DoHeartbeat(args.Id, args.ChunkId)
 	if err != nil {
 		csCountMonitor.Dec()
 		logrus.Errorf("Fail to heartbeat, error code: %v, error detail: %s,", common.MasterHeartbeatFailed, err.Error())

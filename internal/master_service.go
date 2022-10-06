@@ -142,7 +142,7 @@ func DoRegister(ctx context.Context) (string, error) {
 	return id, nil
 }
 
-func DoHeartbeat(Id string) error {
+func DoHeartbeat(Id string, chunkIds []string) error {
 	if dataNode := GetDataNode(Id); dataNode != nil {
 		dataNode.waitTimer.Stop()
 		dataNode.dieTimer.Stop()
@@ -150,6 +150,8 @@ func DoHeartbeat(Id string) error {
 		if dataNode.status == common.Waiting {
 			dataNode.status = common.Alive
 		}
+		// If dataNode's chunks set contains chunksId, it will return false
+		dataNode.Chunks.Add(chunkIds)
 		return nil
 	}
 	return fmt.Errorf("datanode %s not exist", Id)
