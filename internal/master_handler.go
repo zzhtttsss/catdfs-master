@@ -325,7 +325,6 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 	rep := &pb.CheckArgs4AddReply{
 		FileNodeId: fileNodeId,
 		ChunkNum:   chunkNum,
-		Uuid:       op.Uuid,
 	}
 	return rep, nil
 
@@ -422,7 +421,7 @@ func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.Unlock
 	}
 	client := pb.NewSendOperationServiceClient(handler.ClientCon)
 	_, err = client.FinishOperation(context.Background(), &pb.OperationArgs{
-		Uuid:     args.OperationUuid,
+		Uuid:     args.FileNodeId,
 		IsFinish: true,
 	})
 	if err != nil {
