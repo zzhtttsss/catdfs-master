@@ -29,14 +29,21 @@ import (
 
 var GlobalMasterHandler *MasterHandler
 
+// MasterHandler represent a master node to handle all incoming requests.
 type MasterHandler struct {
-	ClientCon             *grpc.ClientConn
-	FSM                   *MasterFSM
-	Raft                  *raft.Raft
+	ClientCon *grpc.ClientConn
+	// FSM is used to ensure metadata consistency.
+	FSM *MasterFSM
+	// Raft manage connection with the cluster.
+	Raft *raft.Raft
+	// FollowerStateObserver is used to observer the change of follower state.
 	FollowerStateObserver *raft.Observer
-	MonitorChan           chan bool
-	EtcdClient            *clientv3.Client
-	raftAddress           string
+	// MonitorChan contain the change of current master's state.
+	MonitorChan chan bool
+	// EtcdClient is used to get connect with ETCD.
+	EtcdClient *clientv3.Client
+	// raftAddress is the address for communication with cluster nodes
+	raftAddress string
 	pb.UnimplementedRegisterServiceServer
 	pb.UnimplementedHeartbeatServiceServer
 	pb.UnimplementedMasterAddServiceServer
@@ -50,7 +57,7 @@ type MasterHandler struct {
 	pb.UnimplementedRaftServiceServer
 }
 
-// CreateMasterHandler Create a global MasterHandler which will handle all incoming requests.
+// CreateMasterHandler create a global MasterHandler.
 func CreateMasterHandler() {
 	var err error
 	config.InitConfig()
@@ -70,7 +77,7 @@ func CreateMasterHandler() {
 	}
 }
 
-// initRaft Initial the raft config of the MasterHandler.
+// initRaft initial the raft config of the MasterHandler.
 func (handler *MasterHandler) initRaft() error {
 	raftConfig := raft.DefaultConfig()
 	raftConfig.SnapshotInterval = 20 * time.Second
@@ -133,7 +140,7 @@ func (handler *MasterHandler) initRaft() error {
 	return nil
 }
 
-// BootstrapOrJoinCluster Bootstrap cluster when there is no cluster, otherwise join cluster.
+// BootstrapOrJoinCluster bootstrap cluster when there is no cluster, otherwise join cluster.
 func (handler *MasterHandler) BootstrapOrJoinCluster() error {
 	ctx := context.Background()
 	kv := clientv3.NewKV(GlobalMasterHandler.EtcdClient)
@@ -172,8 +179,7 @@ func (handler *MasterHandler) BootstrapOrJoinCluster() error {
 	return nil
 }
 
-// joinCluster Called by follower.
-// Join itself to the cluster.
+// joinCluster join follower itself to the cluster.
 func (handler *MasterHandler) joinCluster(getResp *clientv3.GetResponse) (*pb.JoinClusterReply, error) {
 	ctx := context.Background()
 	addr := string(getResp.Kvs[0].Value)
@@ -188,7 +194,7 @@ func (handler *MasterHandler) joinCluster(getResp *clientv3.GetResponse) (*pb.Jo
 	return reply, err
 }
 
-// JoinCluster Called by follower.
+// JoinCluster called by follower.
 // leader will join a follower to the cluster.
 func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClusterArgs) (*pb.JoinClusterReply, error) {
 	p, _ := peer.FromContext(ctx)
@@ -219,7 +225,7 @@ func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClus
 	return &pb.JoinClusterReply{}, nil
 }
 
-// monitorCluster Run in a goroutine.
+// monitorCluster run in a goroutine.
 // This function will monitor the change of current master's state (leader -> follower, follower -> leader).
 // When current master become the leader of the cluster, it will:
 // 1. change leader address in etcd.
@@ -267,7 +273,8 @@ func getFollowerStateObserver() *raft.Observer {
 	return raft.NewObserver(observerChan, false, filterFn)
 }
 
-// Register 由Chunkserver调用该方法，将对应DataNode注册到本NameNode上
+// Register called by chunkserver.
+// It will register a datanode to master.
 func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterArgs) (*pb.DNRegisterReply, error) {
 	p, _ := peer.FromContext(ctx)
 	address := strings.Split(p.Addr.String(), ":")[0]
@@ -304,7 +311,8 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	return rep, nil
 }
 
-// Heartbeat 由Chunkserver调用该方法，维持心跳
+// Heartbeat called by chunkserver.
+// It set the last heartbeat time to now to maintain the connection between chunkserver and master.
 func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
 	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
 	operation := &HeartbeatOperation{
@@ -786,6 +794,7 @@ func (handler *MasterHandler) Server() {
 	server.Serve(listener)
 }
 
+// getData4Apply serializes an Operation and encapsulates the result in OpContainer and serializes OpContainer again.
 func getData4Apply(operation Operation, opType string) []byte {
 	operationBytes, _ := json.Marshal(operation)
 	opContainer := OpContainer{

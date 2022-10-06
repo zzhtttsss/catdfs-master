@@ -7,7 +7,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
@@ -27,26 +26,33 @@ const (
 )
 
 var (
-	OperationTypes = make(map[string]reflect.Type)
+	// OpTypeMap is used to include all types of Operation. When implementing a new type of Operation, we should put
+	// <name of operation, type of operation> into this map.
+	OpTypeMap = make(map[string]reflect.Type)
 )
 
 func init() {
-	OperationTypes[common.OperationRegister] = reflect.TypeOf(RegisterOperation{})
-	OperationTypes[common.OperationHeartbeat] = reflect.TypeOf(HeartbeatOperation{})
-	OperationTypes[common.OperationAdd] = reflect.TypeOf(AddOperation{})
-	OperationTypes[common.OperationGet] = reflect.TypeOf(GetOperation{})
-	OperationTypes[common.OperationMkdir] = reflect.TypeOf(MkdirOperation{})
-	OperationTypes[common.OperationMove] = reflect.TypeOf(MoveOperation{})
-	OperationTypes[common.OperationRemove] = reflect.TypeOf(RemoveOperation{})
-	OperationTypes[common.OperationList] = reflect.TypeOf(ListOperation{})
-	OperationTypes[common.OperationStat] = reflect.TypeOf(StatOperation{})
-	OperationTypes[common.OperationRename] = reflect.TypeOf(RenameOperation{})
+	OpTypeMap[common.OperationRegister] = reflect.TypeOf(RegisterOperation{})
+	OpTypeMap[common.OperationHeartbeat] = reflect.TypeOf(HeartbeatOperation{})
+	OpTypeMap[common.OperationAdd] = reflect.TypeOf(AddOperation{})
+	OpTypeMap[common.OperationGet] = reflect.TypeOf(GetOperation{})
+	OpTypeMap[common.OperationMkdir] = reflect.TypeOf(MkdirOperation{})
+	OpTypeMap[common.OperationMove] = reflect.TypeOf(MoveOperation{})
+	OpTypeMap[common.OperationRemove] = reflect.TypeOf(RemoveOperation{})
+	OpTypeMap[common.OperationList] = reflect.TypeOf(ListOperation{})
+	OpTypeMap[common.OperationStat] = reflect.TypeOf(StatOperation{})
+	OpTypeMap[common.OperationRename] = reflect.TypeOf(RenameOperation{})
 }
 
+// Operation represents requests to make changes to metadata.
 type Operation interface {
+	// Apply will perform modifications to the metadata. Calling it in the MasterFSM can ensure
+	// the consistency of the metadata modification of the master cluster.
 	Apply() (interface{}, error)
 }
 
+// OpContainer is used to encapsulate Operation so that it can be turned into specific type of Operation
+// when be deserialized from bytes.
 type OpContainer struct {
 	OpType string          `json:"op_type"`
 	OpData json.RawMessage `json:"op_data"`
@@ -255,6 +261,7 @@ func (o RenameOperation) Apply() (interface{}, error) {
 	return RenameFileNode(o.Path, o.NewName)
 }
 
+// fileNode2FileInfo converts []*FileNode to []*pb.FileInfo.
 func fileNode2FileInfo(nodes []*FileNode) []*pb.FileInfo {
 	files := make([]*pb.FileInfo, len(nodes))
 	for i := 0; i < len(nodes); i++ {
@@ -264,18 +271,4 @@ func fileNode2FileInfo(nodes []*FileNode) []*pb.FileInfo {
 		}
 	}
 	return files
-}
-
-func (f *FileNode) getFileNodeByPath(path string) *FileNode {
-	currentNode := f
-	path = strings.Trim(path, pathSplitString)
-	fileNames := strings.Split(path, pathSplitString)
-	if path == f.FileName {
-		return f
-	}
-	for _, name := range fileNames {
-		nextNode, _ := currentNode.ChildNodes[name]
-		currentNode = nextNode
-	}
-	return currentNode
 }

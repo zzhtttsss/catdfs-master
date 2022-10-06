@@ -20,10 +20,11 @@ type ApplyResponse struct {
 	Error    error
 }
 
+// MasterFSM implement FSM and make use of the replicated log.
 type MasterFSM struct {
 }
 
-// Apply This function will call Apply function of operation, changes to metadata will be made in that function
+// Apply call Apply function of operation, changes to metadata will be made in that function.
 func (ms MasterFSM) Apply(l *raft.Log) interface{} {
 	operation := ConvBytes2Operation(l.Data)
 	response, err := operation.Apply()
@@ -41,7 +42,7 @@ func ConvBytes2Operation(data []byte) Operation {
 	if err != nil {
 		return nil
 	}
-	operation = reflect.New(OperationTypes[opContainer.OpType]).Interface().(Operation)
+	operation = reflect.New(OpTypeMap[opContainer.OpType]).Interface().(Operation)
 	err = json.Unmarshal(opContainer.OpData, operation)
 	if err != nil {
 		return nil
@@ -152,7 +153,7 @@ func ReadSnapshotLines(r io.ReadCloser) map[string]*FileNode {
 	return res
 }
 
-// RootDeserialize reads the fsimage.txt and rebuild the directory.
+// RootDeserialize reads the snapshot and rebuild the directory.
 func RootDeserialize(rootMap map[string]*FileNode) *FileNode {
 	// Look for root
 	newRoot := &FileNode{}
@@ -167,6 +168,7 @@ func RootDeserialize(rootMap map[string]*FileNode) *FileNode {
 	return newRoot
 }
 
+// buildTree build the directory tree from given map containing all FileNode.
 func buildTree(cur *FileNode, nodeMap map[string]*FileNode) {
 	if cur == nil {
 		return
