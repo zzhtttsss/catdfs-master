@@ -12,19 +12,6 @@ import (
 	"tinydfs-base/protocol/pb"
 )
 
-const (
-	idIdx = iota
-	fileNameIdx
-	parentIdIdx
-	childrenIdx
-	chunksIdIdx
-	sizeIdx
-	isFileIdx
-	delTimeIdx
-	isDelIdx
-	lastLockTimeIdx
-)
-
 var (
 	// OpTypeMap is used to include all types of Operation. When implementing a new type of Operation, we should put
 	// <name of operation, type of operation> into this map.
