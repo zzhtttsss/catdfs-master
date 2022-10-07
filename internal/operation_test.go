@@ -3,7 +3,6 @@ package internal
 import (
 	"container/list"
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"os"
 	"sync"
@@ -32,34 +31,34 @@ func createRootFile(rootA *FileNode) func() {
 	}
 }
 
-func TestReadRootLines(t *testing.T) {
-	test := map[string]*struct {
-		expectRoot *FileNode
-	}{
-		"RootA": {
-			expectRoot: GetRootA(),
-		},
-	}
-
-	for n, c := range test {
-		t.Run(n, func(t *testing.T) {
-			teardown := createRootFile(c.expectRoot)
-			defer teardown()
-			mapp := ReadRootLines("test.txt")
-			_, ok := mapp[c.expectRoot.Id]
-			assert.True(t, ok)
-		})
-	}
-}
-
-func TestRootDeserialize(t *testing.T) {
-	rootA := GetRootA()
-	teardown := createRootFile(rootA)
-	defer teardown()
-	nodeMap := ReadRootLines("test.txt")
-	rootB := RootDeserialize(nodeMap)
-	assert.True(t, rootA.IsDeepEqualTo(rootB))
-}
+//func TestReadRootLines(t *testing.T) {
+//	test := map[string]*struct {
+//		expectRoot *FileNode
+//	}{
+//		"RootA": {
+//			expectRoot: GetRootA(),
+//		},
+//	}
+//
+//	for n, c := range test {
+//		t.Run(n, func(t *testing.T) {
+//			teardown := createRootFile(c.expectRoot)
+//			defer teardown()
+//			mapp := ReadRootLines("test.txt")
+//			_, ok := mapp[c.expectRoot.Id]
+//			assert.True(t, ok)
+//		})
+//	}
+//}
+//
+//func TestRootDeserialize(t *testing.T) {
+//	rootA := GetRootA()
+//	teardown := createRootFile(rootA)
+//	defer teardown()
+//	nodeMap := ReadRootLines("test.txt")
+//	rootB := RootDeserialize(nodeMap)
+//	assert.True(t, rootA.IsDeepEqualTo(rootB))
+//}
 
 func TestWrite(t *testing.T) {
 	file, err := os.OpenFile("write.txt", os.O_CREATE|os.O_WRONLY, 0755)
