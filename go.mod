@@ -4,7 +4,6 @@ go 1.18
 
 require (
 	github.com/deckarep/golang-set v1.8.0
-	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-hclog v1.2.0
 	github.com/hashicorp/raft v1.3.10
 	github.com/hashicorp/raft-boltdb v0.0.0-20220329195025-15018e9b97e0
@@ -65,6 +64,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.0 // indirect
 )
 
-replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20221006051511-3279e9c34364
+replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20221007092716-b04adbecd6a1
 
 //replace tinydfs-base => ../tinydfs-base

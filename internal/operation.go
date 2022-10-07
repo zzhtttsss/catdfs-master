@@ -69,14 +69,16 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 }
 
 type HeartbeatOperation struct {
-	Id         string `json:"id"`
-	DataNodeId string `json:"data_node_id"`
+	Id         string   `json:"id"`
+	DataNodeId string   `json:"data_node_id"`
+	ChunkIds   []string `json:"chunkIds"`
 }
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
 	logrus.Infof("heartbeat, id: %s", o.DataNodeId)
 	if dataNode := GetDataNode(o.DataNodeId); dataNode != nil {
 		dataNode.HeartbeatTime = time.Now()
+		dataNode.Chunks.Add(o.ChunkIds)
 		return nil, nil
 	}
 	return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
