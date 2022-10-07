@@ -72,15 +72,20 @@ func (d *DataNode) String() string {
 // status of DataNode which with no heartbeat for ten minutes.
 func MonitorHeartbeat(ctx context.Context) {
 	for {
-		updateMapLock.Lock()
-		for _, node := range dataNodeMap {
-			if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) {
-				node.status = common.Died
+		select {
+		default:
+			updateMapLock.Lock()
+			for _, node := range dataNodeMap {
+				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) {
+					node.status = common.Died
+				}
 			}
+			updateMapLock.Unlock()
+			logrus.WithContext(ctx).Infof("Complete a round of check, time: %s", time.Now().String())
+			time.Sleep(time.Duration(viper.GetInt(common.MasterCheckTime)) * time.Second)
+		case <-ctx.Done():
+			return
 		}
-		updateMapLock.Unlock()
-		logrus.WithContext(ctx).Infof("Complete a round of check, time: %s", time.Now().String())
-		time.Sleep(time.Duration(viper.GetInt(common.MasterCheckTime)) * time.Second)
 	}
 }
 
