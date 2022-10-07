@@ -1,12 +1,27 @@
 package internal
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	mapset "github.com/deckarep/golang-set"
+	"github.com/hashicorp/raft"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"tinydfs-base/common"
+)
+
+const (
+	dataNodeIdIdx = iota
+	statusIdx
+	addressIdx
+	DNChunksIdx
+	leaseIdx
+	heartbeatIdx
 )
 
 var (
@@ -25,9 +40,53 @@ type DataNode struct {
 	// id of all Chunk stored in this DataNode.
 	Chunks mapset.Set
 	// id of all Chunk that primary DataNode is this DataNode.
-	Leases    mapset.Set
-	waitTimer *time.Timer
-	dieTimer  *time.Timer
+	Leases        mapset.Set
+	HeartbeatTime time.Time
+}
+
+func (d *DataNode) String() string {
+	res := strings.Builder{}
+	chunks := make([]string, d.Chunks.Cardinality())
+	chunkChan := d.Chunks.Iter()
+	index := 0
+	for chunkId := range chunkChan {
+		chunks[index] = chunkId.(string)
+		index++
+	}
+
+	leases := make([]string, d.Leases.Cardinality())
+	leaseChan := d.Leases.Iter()
+	index = 0
+	for chunkId := range leaseChan {
+		leases[index] = chunkId.(string)
+		index++
+	}
+
+	res.WriteString(fmt.Sprintf("%s$%v$%s$%v$%v$%s\n",
+		d.Id, d.status, d.Address, chunks, leases, d.HeartbeatTime.Format(common.LogFileTimeFormat)))
+	return res.String()
+}
+
+// MonitorHeartbeat Run in a goroutine.
+// This function will monitor heartbeat of all DataNode. It will scan dataNodeMap every once in a while and change the
+// status of DataNode which with no heartbeat for ten minutes.
+func MonitorHeartbeat(ctx context.Context) {
+	for {
+		select {
+		default:
+			updateMapLock.Lock()
+			for _, node := range dataNodeMap {
+				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) {
+					node.status = common.Died
+				}
+			}
+			updateMapLock.Unlock()
+			logrus.WithContext(ctx).Infof("Complete a round of check, time: %s", time.Now().String())
+			time.Sleep(time.Duration(viper.GetInt(common.MasterCheckTime)) * time.Second)
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // DataNodeHeap Max heap with capacity "ReplicaNum". It is used to store the first "ReplicaNum" dataNodes
@@ -148,5 +207,56 @@ func ReleaseLease(dataNodeId string, chunkId string) error {
 		return fmt.Errorf("fail to get FileNode from dataNodeMap, fileNodeId : %s", dataNodeId)
 	}
 	dataNode.Leases.Remove(chunkId)
+	return nil
+}
+
+func PersistDataNodes(sink raft.SnapshotSink) error {
+	for _, dataNode := range dataNodeMap {
+		_, err := sink.Write([]byte(dataNode.String()))
+		if err != nil {
+			return err
+		}
+	}
+	_, err := sink.Write([]byte(common.SnapshotDelimiter))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func RestoreDataNodes(buf *bufio.Scanner) error {
+	var (
+		chunks = mapset.NewSet()
+		leases = mapset.NewSet()
+	)
+
+	for buf.Scan() {
+		line := buf.Text()
+		if line == common.SnapshotDelimiter {
+			return nil
+		}
+		data := strings.Split(line, "$")
+
+		chunksLen := len(data[DNChunksIdx])
+		chunksData := data[DNChunksIdx][1 : chunksLen-1]
+		for _, chunkId := range strings.Split(chunksData, " ") {
+			chunks.Add(chunkId)
+		}
+		leasesLen := len(data[leaseIdx])
+		leasesData := data[leaseIdx][1 : leasesLen-1]
+		for _, chunkId := range strings.Split(leasesData, " ") {
+			leases.Add(chunkId)
+		}
+		heartbeatTime, _ := time.Parse(common.LogFileTimeFormat, data[heartbeatIdx])
+		status, _ := strconv.Atoi(data[statusIdx])
+		dataNodeMap[data[dataNodeIdIdx]] = &DataNode{
+			Id:            data[dataNodeIdIdx],
+			status:        status,
+			Address:       data[addressIdx],
+			Chunks:        chunks,
+			Leases:        leases,
+			HeartbeatTime: heartbeatTime,
+		}
+	}
 	return nil
 }
