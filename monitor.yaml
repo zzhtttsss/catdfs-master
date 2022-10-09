@@ -35,7 +35,7 @@ services:
     networks:
       - default
     ports:
-      - "3000:3000"
+      - "8000:3000"
 
   prometheus:
     image: prom/prometheus

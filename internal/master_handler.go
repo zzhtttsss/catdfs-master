@@ -73,7 +73,7 @@ func CreateMasterHandler() {
 	if err != nil {
 		logrus.Panicf("Fail to get etcd client, error detail : %s", err.Error())
 	}
-	//err = GlobalMasterHandler.initRaft()
+	err = GlobalMasterHandler.initRaft()
 	if err != nil {
 		logrus.Panicf("Fail to init raft, error detail : %s", err.Error())
 	}
