@@ -49,19 +49,6 @@ services:
     depends_on:
       - master1
 
-#  cadvisor2:
-#    image: google/cadvisor:latest
-#    container_name: cadvisor2
-#    privileged: true
-#    network_mode: service:master2
-#    volumes:
-#      - /:/rootfs:ro
-#      - /var/run:/var/run:rw
-#      - /sys:/sys:ro
-#      - /var/lib/docker/:/var/lib/docker:ro
-#    depends_on:
-#      - master2
-
   master3:
     image: tinydfs-master-master1
     container_name: master3
@@ -71,15 +58,4 @@ services:
     depends_on:
       - master1
 
-#  cadvisor3:
-#    image: google/cadvisor:latest
-#    container_name: cadvisor3
-#    privileged: true
-#    network_mode: service:master3
-#    volumes:
-#      - /:/rootfs:ro
-#      - /var/run:/var/run:rw
-#      - /sys:/sys:ro
-#      - /var/lib/docker/:/var/lib/docker:ro
-#    depends_on:
-#      - master3
+
