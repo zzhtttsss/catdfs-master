@@ -1,0 +1,26 @@
+version: '3.8'
+
+networks:
+  default:
+    external:
+      name: es-network
+
+services:
+  cs1:
+    image: cs
+    container_name: cs1
+    networks:
+      - default
+
+  cs2:
+    image: cs
+    container_name: cs2
+    networks:
+      - default
+
+
+  cs3:
+    image: cs
+    container_name: cs3
+    networks:
+      - default

@@ -38,3 +38,15 @@ scrape_configs:
   - job_name: 'master3'
     static_configs:
       - targets: [ 'master3:9101' ]
+
+  - job_name: 'cs1'
+    static_configs:
+      - targets: [ 'cs1:9101' ]
+
+  - job_name: 'cs2'
+    static_configs:
+      - targets: [ 'cs2:9101' ]
+
+  - job_name: 'cs3'
+    static_configs:
+      - targets: [ 'cs3:9101' ]

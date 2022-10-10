@@ -5,22 +5,11 @@ networks:
     external:
       name: es-network
 
-volumes:
-  hostproc1:
-    external: false
-  hostproc2:
-    external: false
-  hostproc3:
-    external: false
-  hostsys1:
-    external: false
-  hostroot1:
-    external: false
 
 services:
 
   master1:
-    build: .
+    image: master
     container_name: master1
     networks:
       default:
@@ -41,7 +30,7 @@ services:
       - master1
 
   master2:
-    image: tinydfs-master-master1
+    image: master
     container_name: master2
     networks:
       default:
@@ -50,7 +39,7 @@ services:
       - master1
 
   master3:
-    image: tinydfs-master-master1
+    image: master
     container_name: master3
     networks:
       default:

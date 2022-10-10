@@ -521,7 +521,6 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 
 	rep := &pb.ReleaseLease4AddReply{}
 	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
-	SuccessCountInc(handler.SelfAddr, common.OperationAdd)
 	return rep, nil
 
 }
@@ -592,6 +591,7 @@ func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.Unlock
 
 	rep := &pb.UnlockDic4AddReply{}
 	logrus.WithContext(ctx).Infof("Success to unlock FileNodes in the target path, FileNodeId: %s", args.FileNodeId)
+	SuccessCountInc(handler.SelfAddr, common.OperationAdd)
 	return rep, nil
 }
 

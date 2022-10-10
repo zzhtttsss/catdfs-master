@@ -78,7 +78,11 @@ func (o HeartbeatOperation) Apply() (interface{}, error) {
 	logrus.Infof("heartbeat, id: %s", o.DataNodeId)
 	if dataNode := GetDataNode(o.DataNodeId); dataNode != nil {
 		dataNode.HeartbeatTime = time.Now()
-		dataNode.Chunks.Add(o.ChunkIds)
+		for _, id := range o.ChunkIds {
+			if !dataNode.Chunks.Contains(id) {
+				dataNode.Chunks.Add(id)
+			}
+		}
 		return nil, nil
 	}
 	return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
