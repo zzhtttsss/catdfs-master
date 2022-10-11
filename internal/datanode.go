@@ -89,8 +89,8 @@ func MonitorHeartbeat(ctx context.Context) {
 	}
 }
 
-// DataNodeHeap Max heap with capacity "ReplicaNum". It is used to store the first "ReplicaNum" dataNodes
-// with the least number of memory blocks
+// DataNodeHeap is max heap with capacity "ReplicaNum".
+// It is used to store the first "ReplicaNum" dataNodes with the least number of memory blocks.
 type DataNodeHeap []*DataNode
 
 func (h DataNodeHeap) Len() int {
@@ -132,7 +132,7 @@ func GetDataNode(id string) *DataNode {
 
 // AllocateDataNodes Select several DataNode to store a Chunk. DataNode allocation strategy is:
 // 1. First select the first "ReplicaNum" dataNodes with the least number of memory blocks.
-// 2. Select the node with the least number of leases from these nodes as the primary DataNode of the Chunk
+// 2. Select the node with the least number of leases from these nodes as the primary DataNode of the Chunk.
 func AllocateDataNodes() ([]*DataNode, *DataNode) {
 	updateHeapLock.Lock()
 	allDataNodes := make([]*DataNode, dataNodeHeap.Len())
