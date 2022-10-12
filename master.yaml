@@ -5,81 +5,46 @@ networks:
     external:
       name: es-network
 
-volumes:
-  hostproc1:
-    external: false
-  hostproc2:
-    external: false
-  hostproc3:
-    external: false
-  hostsys1:
-    external: false
-  hostroot1:
-    external: false
 
 services:
 
   master1:
-    build: .
+    image: master
     container_name: master1
     networks:
       default:
         ipv4_address: 172.18.0.11
 
   cadvisor:
-    image: gcr.io/google-containers/cadvisor:latest
+    image: zcube/cadvisor:latest
     container_name: cadvisor
+    privileged: true
     network_mode: service:master1
-    ports:
-      - "9100:8080"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:rw
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
     depends_on:
       - master1
 
-#  master2:
-#    build: .
-#    container_name: master2
-#    networks:
-#      default:
-#        ipv4_address: 172.18.0.12
-#
-#  node_exporter2:
-#    image: quay.io/prometheus/node-exporter:latest
-#    container_name: node_exporter2
-#    command:
-#      - "--path.procfs=/proc"
-#      - "--collector.filesystem.ignored-mount-points"
-#      - "^/(rootfs/)?(dev|etc|host|proc|run|sys|volume1)($$|/)"
-#    network_mode: service:master2
-#    pid: host
-#    restart: unless-stopped
-#    depends_on:
-#      - master2
-#    volumes:
-#      - '/:/rootfs:ro'
-#
-#  master3:
-#    build: .
-#    container_name: master3
-#    networks:
-#      default:
-#        ipv4_address: 172.18.0.13
-#
-#  node_exporter3:
-#    image: quay.io/prometheus/node-exporter:latest
-#    container_name: node_exporter3
-#    command:
-#      - "--path.procfs=/proc"
-#      - "--collector.filesystem.ignored-mount-points"
-#      - "^/(rootfs/)?(dev|etc|host|proc|run|sys|volume1)($$|/)"
-#    network_mode: service:master3
-#    pid: host
-#    restart: unless-stopped
-#    depends_on:
-#      - master3
-#    volumes:
-#      - '/:/rootfs:ro'
+  master2:
+    image: master
+    container_name: master2
+    networks:
+      default:
+        ipv4_address: 172.18.0.12
+    depends_on:
+      - master1
+
+  master3:
+    image: master
+    container_name: master3
+    networks:
+      default:
+        ipv4_address: 172.18.0.13
+    depends_on:
+      - master1
+
+

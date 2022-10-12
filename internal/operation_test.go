@@ -3,10 +3,12 @@ package internal
 import (
 	"container/list"
 	"fmt"
+	set "github.com/deckarep/golang-set"
 	"io"
 	"os"
 	"sync"
 	"testing"
+	"time"
 )
 
 func createRootFile(rootA *FileNode) func() {
@@ -100,4 +102,39 @@ func TestRead(t *testing.T) {
 		fmt.Println(string(bytes[:n]))
 	}
 
+}
+
+func TestHeartbeatOperation_Apply(t *testing.T) {
+	node := &DataNode{
+		Id:            "aaaa",
+		status:        0,
+		Address:       "localhost:9090",
+		Chunks:        set.NewSet(),
+		Leases:        set.NewSet(),
+		HeartbeatTime: time.Time{},
+	}
+	AddDataNode(node)
+	a := &HeartbeatOperation{
+		Id:         "op1",
+		DataNodeId: "aaaa",
+		ChunkIds:   []string{"a", "b", "c"},
+	}
+	b := &HeartbeatOperation{
+		Id:         "op2",
+		DataNodeId: "aaaa",
+		ChunkIds:   []string{"a", "b", "d"},
+	}
+	c := &HeartbeatOperation{
+		Id:         "op3",
+		DataNodeId: "aaaa",
+		ChunkIds:   []string{"a", "d", "c", "f"},
+	}
+	f := func(operation *HeartbeatOperation) {
+		operation.Apply()
+	}
+	go f(a)
+	go f(b)
+	go f(c)
+	time.Sleep(time.Second)
+	println(node.Chunks.String())
 }

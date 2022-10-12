@@ -44,6 +44,8 @@ type MasterHandler struct {
 	EtcdClient *clientv3.Client
 	// raftAddress is the address for communication with cluster nodes
 	raftAddress string
+	// SelfAddr represents the local addr
+	SelfAddr string
 	pb.UnimplementedRegisterServiceServer
 	pb.UnimplementedHeartbeatServiceServer
 	pb.UnimplementedMasterAddServiceServer
@@ -308,6 +310,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		Id: id,
 	}
 	logrus.WithContext(ctx).Infof("Success to register a datanode from chunkserver, address: %s, id: %s", address, id)
+	csCountMonitor.Inc()
 	return rep, nil
 }
 
@@ -318,6 +321,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 	operation := &HeartbeatOperation{
 		Id:         util.GenerateUUIDString(),
 		DataNodeId: args.Id,
+		ChunkIds:   args.ChunkId,
 	}
 	data := getData4Apply(operation, common.OperationHeartbeat)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
@@ -327,6 +331,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 			Code: common.MasterHeartbeatFailed,
 			Msg:  err.Error(),
 		})
+		csCountMonitor.Dec()
 		return nil, details.Err()
 	}
 	response := (applyFuture.Response()).(*ApplyResponse)
@@ -347,6 +352,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 // Check whether the path and file name entered by the user in the Add operation are legal.
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
+	RequestCountInc(handler.SelfAddr, common.OperationAdd)
 	operation := &AddOperation{
 		Id:         util.GenerateUUIDString(),
 		FileNodeId: util.GenerateUUIDString(),
@@ -383,6 +389,7 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 // check get args and get the FileNode according to path
 func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAndGetArgs) (*pb.CheckAndGetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for getting fileNode for path, Path: %s", args.Path)
+	RequestCountInc(handler.SelfAddr, common.OperationGet)
 	operation := &GetOperation{
 		Id:    util.GenerateUUIDString(),
 		Path:  args.Path,
@@ -549,6 +556,7 @@ func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.Rel
 
 	rep := &pb.ReleaseLease4GetReply{}
 	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
+	SuccessCountInc(handler.SelfAddr, common.OperationGet)
 	return rep, nil
 }
 
@@ -583,6 +591,7 @@ func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.Unlock
 
 	rep := &pb.UnlockDic4AddReply{}
 	logrus.WithContext(ctx).Infof("Success to unlock FileNodes in the target path, FileNodeId: %s", args.FileNodeId)
+	SuccessCountInc(handler.SelfAddr, common.OperationAdd)
 	return rep, nil
 }
 
@@ -590,6 +599,7 @@ func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.Unlock
 // Check args and make directory at target path.
 func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckAndMkDirArgs) (*pb.CheckAndMkDirReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and make directory at target path from client, path: %s, dirName: %s", args.Path, args.DirName)
+	RequestCountInc(handler.SelfAddr, common.OperationMkdir)
 	operation := &MkdirOperation{
 		Id:       util.GenerateUUIDString(),
 		Path:     args.Path,
@@ -617,6 +627,7 @@ func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckA
 
 	rep := &pb.CheckAndMkDirReply{}
 	logrus.WithContext(ctx).Infof("Success to check args and make directory at target path from client, path: %s, dirName: %s", args.Path, args.DirName)
+	SuccessCountInc(handler.SelfAddr, common.OperationMkdir)
 	return rep, nil
 }
 
@@ -624,6 +635,7 @@ func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckA
 // Check args and move directory or file to target path.
 func (handler *MasterHandler) CheckAndMove(ctx context.Context, args *pb.CheckAndMoveArgs) (*pb.CheckAndMoveReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and move directory or file to target path from client, sourcePath: %s, targetPath: %s", args.SourcePath, args.TargetPath)
+	RequestCountInc(handler.SelfAddr, common.OperationMove)
 	operation := &MoveOperation{
 		Id:         util.GenerateUUIDString(),
 		SourcePath: args.SourcePath,
@@ -651,6 +663,7 @@ func (handler *MasterHandler) CheckAndMove(ctx context.Context, args *pb.CheckAn
 
 	rep := &pb.CheckAndMoveReply{}
 	logrus.WithContext(ctx).Infof("Success to check args and move directory or file to target path from client, sourcePath: %s, targetPath: %s", args.SourcePath, args.TargetPath)
+	SuccessCountInc(handler.SelfAddr, common.OperationMove)
 	return rep, nil
 }
 
@@ -658,6 +671,7 @@ func (handler *MasterHandler) CheckAndMove(ctx context.Context, args *pb.CheckAn
 // Check args and remove directory or file at target path.
 func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.CheckAndRemoveArgs) (*pb.CheckAndRemoveReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and remove directory or file at target path from client, path: %s", args.Path)
+	RequestCountInc(handler.SelfAddr, common.OperationRemove)
 	operation := &RemoveOperation{
 		Id:   util.GenerateUUIDString(),
 		Path: args.Path,
@@ -684,6 +698,7 @@ func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.Check
 
 	rep := &pb.CheckAndRemoveReply{}
 	logrus.WithContext(ctx).Infof("Success to check args and remove directory or file at target path from client, path: %s", args.Path)
+	SuccessCountInc(handler.SelfAddr, common.OperationRemove)
 	return rep, nil
 }
 
@@ -691,6 +706,7 @@ func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.Check
 // Check args and ls the specified directory.
 func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAndListArgs) (*pb.CheckAndListReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and list the specified directory, path: %s", args.Path)
+	RequestCountInc(handler.SelfAddr, common.OperationList)
 	operation := &ListOperation{
 		Id:   util.GenerateUUIDString(),
 		Path: args.Path,
@@ -708,6 +724,7 @@ func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAn
 		Files: response.([]*pb.FileInfo),
 	}
 	logrus.WithContext(ctx).Infof("Success to check args and list specified directory, path: %s", args.Path)
+	SuccessCountInc(handler.SelfAddr, common.OperationList)
 	return rep, nil
 }
 
@@ -715,6 +732,7 @@ func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAn
 // Check args and return the specified file info.
 func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAndStatArgs) (*pb.CheckAndStatReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and get the specified file info, path: %s", args.Path)
+	RequestCountInc(handler.SelfAddr, common.OperationStat)
 	operation := &StatOperation{
 		Id:   util.GenerateUUIDString(),
 		Path: args.Path,
@@ -735,6 +753,7 @@ func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAn
 		Size:     info.Size,
 	}
 	logrus.WithContext(ctx).Infof("Success to check args and get the specified file info, path: %s", args.Path)
+	SuccessCountInc(handler.SelfAddr, common.OperationStat)
 	return rep, nil
 }
 
@@ -742,6 +761,7 @@ func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAn
 // Check args and rename the specified file to a new name.
 func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.CheckAndRenameArgs) (*pb.CheckAndRenameReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and rename the specified file to a new name, path: %s, new name: %s", args.Path, args.NewName)
+	RequestCountInc(handler.SelfAddr, common.OperationRename)
 	operation := &RenameOperation{
 		Id:      util.GenerateUUIDString(),
 		Path:    args.Path,
@@ -769,6 +789,7 @@ func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.Check
 
 	rep := &pb.CheckAndRenameReply{}
 	logrus.WithContext(ctx).Infof("Success to check args and rename the specified file to a new name, path: %s", args.Path)
+	SuccessCountInc(handler.SelfAddr, common.OperationRename)
 	return rep, nil
 }
 
@@ -778,7 +799,9 @@ func (handler *MasterHandler) Server() {
 		logrus.Errorf("Fail to server, error code: %v, error detail: %s,", common.MasterRPCServerFailed, err.Error())
 		os.Exit(1)
 	}
-	server := grpc.NewServer()
+	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor))
+	localIP, _ := util.GetLocalIP()
+	handler.SelfAddr = localIP
 	pb.RegisterRegisterServiceServer(server, handler)
 	pb.RegisterHeartbeatServiceServer(server, handler)
 	pb.RegisterMasterAddServiceServer(server, handler)

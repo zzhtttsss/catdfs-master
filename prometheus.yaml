@@ -25,23 +25,28 @@ scrape_configs:
     # scheme defaults to 'http'.
     static_configs:
       - targets: ['localhost:9090']
-  - job_name: 'master1_cadvisor'
+  - job_name: 'cadvisor'
     static_configs:
-      - targets: ['172.18.0.11:9100']
+      - targets: ['master1:8080']
+
   - job_name: 'master1'
     static_configs:
-      - targets: ['172.18.0.11:9101']
-
-  - job_name: 'master2_node_reporter'
-    static_configs:
-      - targets: [ '172.18.0.12:9100' ]
+      - targets: ['master1:9101']
   - job_name: 'master2'
     static_configs:
-      - targets: [ '172.18.0.12:9101' ]
-
-  - job_name: 'master3_node_reporter'
-    static_configs:
-      - targets: [ '172.18.0.13:9100' ]
+      - targets: [ 'master2:9101' ]
   - job_name: 'master3'
     static_configs:
-      - targets: [ '172.18.0.13:9101' ]
+      - targets: [ 'master3:9101' ]
+
+  - job_name: 'cs1'
+    static_configs:
+      - targets: [ 'cs1:9101' ]
+
+  - job_name: 'cs2'
+    static_configs:
+      - targets: [ 'cs2:9101' ]
+
+  - job_name: 'cs3'
+    static_configs:
+      - targets: [ 'cs3:9101' ]

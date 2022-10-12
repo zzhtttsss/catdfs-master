@@ -69,8 +69,9 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 }
 
 type HeartbeatOperation struct {
-	Id         string `json:"id"`
-	DataNodeId string `json:"data_node_id"`
+	Id         string   `json:"id"`
+	DataNodeId string   `json:"data_node_id"`
+	ChunkIds   []string `json:"chunkIds"`
 }
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
