@@ -24,3 +24,16 @@ services:
     container_name: cs3
     networks:
       - default
+
+  cs4:
+    image: cs
+    container_name: cs4
+    networks:
+      - default
+
+
+  cs5:
+    image: cs
+    container_name: cs5
+    networks:
+      - default

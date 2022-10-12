@@ -3,7 +3,7 @@ package main
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"log"
+	"github.com/sirupsen/logrus"
 	"net/http"
 	"tinydfs-base/common"
 	"tinydfs-master/internal"
@@ -27,6 +27,6 @@ func main() {
 	))
 	err := http.ListenAndServe(common.AddressDelimiter+MetricsServerPort, nil)
 	if err != nil {
-		log.Println("Http server error, port 9101", err)
+		logrus.Warnf("Http server error, Error detail %s", err)
 	}
 }
