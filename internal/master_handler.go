@@ -45,9 +45,10 @@ type MasterHandler struct {
 	// MonitorChan contain the change of current master's state.
 	MonitorChan chan bool
 	// EtcdClient is used to get connect with ETCD.
-	EtcdClient      *clientv3.Client
+	EtcdClient *clientv3.Client
+	// FollowerLeaseId is lease id when this node is a follower.
 	FollowerLeaseId clientv3.LeaseID
-	// raftAddress is the address for communication with cluster nodes
+	// raftAddress is the address for communication with cluster nodes.
 	raftAddress string
 	// SelfAddr represents the local addr
 	SelfAddr string
@@ -201,6 +202,7 @@ func (handler *MasterHandler) joinCluster(getResp *clientv3.GetResponse) (*pb.Jo
 	return reply, err
 }
 
+// putAndKeepFollower register follower to etcd and create a lease to keep alive.
 func (handler *MasterHandler) putAndKeepFollower() {
 	client := handler.EtcdClient
 	ctx := context.Background()
@@ -262,11 +264,13 @@ func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClus
 // This function will monitor the change of current master's state (leader -> follower, follower -> leader).
 // When current master become the leader of the cluster, it will:
 // 1. change leader address in etcd.
-// 2. register an observer to observe follower state.
-// 3. monitor heartbeat of all DataNode in a goroutine.
+// 2. deregister as follower from etcd.
+// 3. register an observer to observe follower state.
+// 4. monitor heartbeat of all DataNode in a goroutine.
 // When current master become the follower of the cluster, it will:
 // 1. deregister the observer which observes follower state.
 // 2. use cancel function to stop the goroutine which monitors heartbeat.
+// 3. register itself to etcd as follower.
 func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 	for {
 		subContext, cancel := context.WithCancel(ctx)
