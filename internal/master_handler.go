@@ -27,6 +27,10 @@ import (
 	"tinydfs-base/protocol/pb"
 )
 
+const (
+	ttl = 5
+)
+
 var GlobalMasterHandler *MasterHandler
 
 // MasterHandler represent a master node to handle all incoming requests.
@@ -42,7 +46,9 @@ type MasterHandler struct {
 	MonitorChan chan bool
 	// EtcdClient is used to get connect with ETCD.
 	EtcdClient *clientv3.Client
-	// raftAddress is the address for communication with cluster nodes
+	// FollowerLeaseId is lease id when this node is a follower.
+	FollowerLeaseId clientv3.LeaseID
+	// raftAddress is the address for communication with cluster nodes.
 	raftAddress string
 	// SelfAddr represents the local addr
 	SelfAddr string
@@ -116,13 +122,12 @@ func (handler *MasterHandler) initRaft() error {
 		logrus.Errorf("Fail to create FileSnapshotStore, error detail: %s", err.Error())
 		return err
 	}
-
-	logDB, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "logs.dat"))
+	logDB, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, common.LogDBName))
 	if err != nil {
 		logrus.Errorf("Fail to create log DB, error detail: %s", err.Error())
 		return err
 	}
-	stableDB, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "stable.dat"))
+	stableDB, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, common.StableDBName))
 	if err != nil {
 		logrus.Errorf("Fail to create stable DB, error detail: %s", err.Error())
 		return err
@@ -134,7 +139,7 @@ func (handler *MasterHandler) initRaft() error {
 		return err
 	}
 	handler.Raft = r
-	err = handler.BootstrapOrJoinCluster()
+	err = handler.bootstrapOrJoinCluster()
 	if err != nil {
 		logrus.Errorf("Fail to bootstrap or join, error detail: %s", err.Error())
 		return err
@@ -142,10 +147,10 @@ func (handler *MasterHandler) initRaft() error {
 	return nil
 }
 
-// BootstrapOrJoinCluster bootstrap cluster when there is no cluster, otherwise join cluster.
-func (handler *MasterHandler) BootstrapOrJoinCluster() error {
+// bootstrapOrJoinCluster bootstrap cluster when there is no cluster, otherwise join cluster.
+func (handler *MasterHandler) bootstrapOrJoinCluster() error {
 	ctx := context.Background()
-	kv := clientv3.NewKV(GlobalMasterHandler.EtcdClient)
+	kv := clientv3.NewKV(handler.EtcdClient)
 	getResp, err := kv.Get(ctx, common.LeaderAddressKey)
 	if err != nil {
 		logrus.Errorf("Fail to get kv when init, error detail: %s", err.Error())
@@ -186,14 +191,42 @@ func (handler *MasterHandler) joinCluster(getResp *clientv3.GetResponse) (*pb.Jo
 	ctx := context.Background()
 	addr := string(getResp.Kvs[0].Value)
 	addr = strings.Split(addr, common.AddressDelimiter)[0] + viper.GetString(common.MasterPort)
-	logrus.Infof("leader address is: %s", addr)
+
 	conn, _ := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	client := pb.NewRaftServiceClient(conn)
 	reply, err := client.JoinCluster(ctx, &pb.JoinClusterArgs{})
 	if err != nil {
 		logrus.Errorf("Fail to join cluster, error detail : %s", err.Error())
 	}
+	go handler.putAndKeepFollower()
 	return reply, err
+}
+
+// putAndKeepFollower register follower to etcd and create a lease to keep alive.
+func (handler *MasterHandler) putAndKeepFollower() {
+	client := handler.EtcdClient
+	ctx := context.Background()
+	kv := clientv3.NewKV(client)
+	hostname, err := os.Hostname()
+	if err != nil {
+		logrus.Panicf("Fail to get hostname, error detail: %s", err.Error())
+	}
+	lease, err := client.Grant(ctx, int64(ttl))
+	if err != nil {
+		logrus.Panicf("Fail to create lease, error detail: %s", err.Error())
+	}
+	handler.FollowerLeaseId = lease.ID
+	_, err = kv.Put(ctx, common.FollowerKeyPrefix+hostname, handler.raftAddress, clientv3.WithLease(lease.ID))
+
+	keepAliveChan, err := client.KeepAlive(ctx, lease.ID)
+	if err != nil {
+		logrus.Panicf("Fail to keep alive, error detail: %s", err.Error())
+	}
+	for res := range keepAliveChan {
+		b, _ := json.Marshal(res)
+		logrus.Infof("Success to keep lease alive: %s", string(b))
+	}
+	logrus.Infof("Stop keeping lease alive")
 }
 
 // JoinCluster called by follower.
@@ -231,21 +264,28 @@ func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClus
 // This function will monitor the change of current master's state (leader -> follower, follower -> leader).
 // When current master become the leader of the cluster, it will:
 // 1. change leader address in etcd.
-// 2. register an observer to observe follower state.
-// 3. monitor heartbeat of all DataNode in a goroutine.
+// 2. deregister as follower from etcd.
+// 3. register an observer to observe follower state.
+// 4. monitor heartbeat of all DataNode in a goroutine.
 // When current master become the follower of the cluster, it will:
 // 1. deregister the observer which observes follower state.
 // 2. use cancel function to stop the goroutine which monitors heartbeat.
+// 3. register itself to etcd as follower.
 func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 	for {
 		subContext, cancel := context.WithCancel(ctx)
 		select {
 		case isLeader := <-handler.MonitorChan:
 			if isLeader {
+				// todo 错误处理
 				kv := clientv3.NewKV(handler.EtcdClient)
 				_, err := kv.Put(ctx, common.LeaderAddressKey, handler.raftAddress)
 				if err != nil {
 					logrus.Errorf("Fail to put kv when leader change")
+				}
+				_, err = handler.EtcdClient.Revoke(ctx, handler.FollowerLeaseId)
+				if err != nil {
+					logrus.Errorf("Fail to revoke lease")
 				}
 				handler.FollowerStateObserver = getFollowerStateObserver()
 				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
@@ -254,6 +294,7 @@ func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 			} else {
 				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
 				cancel()
+				go handler.putAndKeepFollower()
 				logrus.Infof("Become follower")
 			}
 		}
