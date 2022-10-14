@@ -8,6 +8,7 @@ import (
 	"reflect"
 )
 
+// ApplyResponse is the reply of MasterFSM's Apply function.
 type ApplyResponse struct {
 	Response interface{}
 	Error    error
@@ -48,7 +49,8 @@ func (ms MasterFSM) Snapshot() (raft.FSMSnapshot, error) {
 	return &snapshot{}, nil
 }
 
-// Restore read snapshot and restore metadata from it.
+// Restore read snapshot and restore metadata from it. There are three part of metadata
+// need to be restored: directory tree, DataNode information and Chunk information
 func (ms MasterFSM) Restore(r io.ReadCloser) error {
 	buf := bufio.NewScanner(r)
 	err := RestoreDirTree(buf)

@@ -1,13 +1,13 @@
-# master 配置
+# master config
 master:
   rpcPort: ":9099"
   raftPort: "2345"
   raftDir: "./raftData"
 
-# chunk server 配置
+# chunk server config
 chunk:
   checkTime: 180
-  dieTime: 600     # chunk server死亡时间
+  dieTime: 600     # chunkserver died time
   replicaNum: 3   # number of replica that a chunk will be store
 
 # etcd config
