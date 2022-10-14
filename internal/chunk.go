@@ -16,16 +16,19 @@ const (
 )
 
 var (
-	// Store all Chunk, using id as the key
+	// chunksMap stores all Chunk in the file system, using id as the key.
 	chunksMap        = make(map[string]*Chunk)
 	updateChunksLock = &sync.RWMutex{}
 )
 
 type Chunk struct {
-	// ChunkId = FileNodeId+_+ChunkNum
+	// Id is FileNodeId+_+ChunkNum
 	Id string
-	// id of all DataNode storing this Chunk.
-	dataNodes   []string
+	// dataNodes includes all id of DataNode which are storing this Chunk.
+	dataNodes []string
+	// primaryNode is the id of DataNode which has the lease of this Chunk.
+	// Operations involving the chunkserver are all communicated with the
+	// client by this DataNode
 	primaryNode string
 }
 
@@ -55,6 +58,7 @@ func GetChunk(id string) *Chunk {
 	return chunksMap[id]
 }
 
+// PersistChunks writes all Chunk in chunksMap to the sink for persistence.
 func PersistChunks(sink raft.SnapshotSink) error {
 	for _, chunk := range chunksMap {
 		_, err := sink.Write([]byte(chunk.String()))
@@ -69,6 +73,7 @@ func PersistChunks(sink raft.SnapshotSink) error {
 	return nil
 }
 
+// RestoreChunks reads all Chunk from the buf and puts them into chunksMap.
 func RestoreChunks(buf *bufio.Scanner) error {
 	chunksMap = map[string]*Chunk{}
 	for buf.Scan() {

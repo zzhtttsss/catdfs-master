@@ -50,7 +50,7 @@ type MasterHandler struct {
 	FollowerLeaseId clientv3.LeaseID
 	// raftAddress is the address for communication with cluster nodes.
 	raftAddress string
-	// SelfAddr represents the local addr
+	// SelfAddr represents the local address
 	SelfAddr string
 	pb.UnimplementedRegisterServiceServer
 	pb.UnimplementedHeartbeatServiceServer
@@ -85,7 +85,7 @@ func CreateMasterHandler() {
 	}
 }
 
-// initRaft initial the raft config of the MasterHandler.
+// initRaft initials the raft config of the MasterHandler.
 func (handler *MasterHandler) initRaft() error {
 	raftConfig := raft.DefaultConfig()
 	raftConfig.SnapshotInterval = 20 * time.Second
@@ -147,7 +147,8 @@ func (handler *MasterHandler) initRaft() error {
 	return nil
 }
 
-// bootstrapOrJoinCluster bootstrap cluster when there is no cluster, otherwise join cluster.
+// bootstrapOrJoinCluster bootstraps cluster when there is no cluster, otherwise
+// join cluster.
 func (handler *MasterHandler) bootstrapOrJoinCluster() error {
 	ctx := context.Background()
 	kv := clientv3.NewKV(handler.EtcdClient)
@@ -186,7 +187,7 @@ func (handler *MasterHandler) bootstrapOrJoinCluster() error {
 	return nil
 }
 
-// joinCluster join follower itself to the cluster.
+// joinCluster joins follower itself to the cluster.
 func (handler *MasterHandler) joinCluster(getResp *clientv3.GetResponse) (*pb.JoinClusterReply, error) {
 	ctx := context.Background()
 	addr := string(getResp.Kvs[0].Value)
@@ -202,7 +203,7 @@ func (handler *MasterHandler) joinCluster(getResp *clientv3.GetResponse) (*pb.Jo
 	return reply, err
 }
 
-// putAndKeepFollower register follower to etcd and create a lease to keep alive.
+// putAndKeepFollower registers follower to etcd and create a lease to keep alive.
 func (handler *MasterHandler) putAndKeepFollower() {
 	client := handler.EtcdClient
 	ctx := context.Background()
@@ -229,8 +230,7 @@ func (handler *MasterHandler) putAndKeepFollower() {
 	logrus.Infof("Stop keeping lease alive")
 }
 
-// JoinCluster called by follower.
-// leader will join a follower to the cluster.
+// JoinCluster is called by follower. Leader joins a follower to the cluster.
 func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClusterArgs) (*pb.JoinClusterReply, error) {
 	p, _ := peer.FromContext(ctx)
 	address := strings.Split(p.Addr.String(), common.AddressDelimiter)[0]
@@ -261,7 +261,8 @@ func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClus
 }
 
 // monitorCluster run in a goroutine.
-// This function will monitor the change of current master's state (leader -> follower, follower -> leader).
+// This function will monitor the change of current master's state (leader ->
+// follower, follower -> leader).
 // When current master become the leader of the cluster, it will:
 // 1. change leader address in etcd.
 // 2. deregister as follower from etcd.
@@ -316,8 +317,7 @@ func getFollowerStateObserver() *raft.Observer {
 	return raft.NewObserver(observerChan, false, filterFn)
 }
 
-// Register called by chunkserver.
-// It will register a datanode to master.
+// Register is called by chunkserver. It registers a DataNode to master.
 func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterArgs) (*pb.DNRegisterReply, error) {
 	p, _ := peer.FromContext(ctx)
 	address := strings.Split(p.Addr.String(), ":")[0]
@@ -355,8 +355,8 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	return rep, nil
 }
 
-// Heartbeat called by chunkserver.
-// It set the last heartbeat time to now to maintain the connection between chunkserver and master.
+// Heartbeat is called by chunkserver. It sets the last heartbeat time to now to
+// maintain the connection between chunkserver and master.
 func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
 	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
 	operation := &HeartbeatOperation{
@@ -389,8 +389,8 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 	return rep, nil
 }
 
-// CheckArgs4Add Called by client.
-// Check whether the path and file name entered by the user in the Add operation are legal.
+// CheckArgs4Add is called by client. It check whether the path and file name
+// entered by the user in the Add operation are legal.
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
 	RequestCountInc(handler.SelfAddr, common.OperationAdd)
@@ -426,8 +426,8 @@ func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckA
 
 }
 
-// CheckAndGet called by client
-// check get args and get the FileNode according to path
+// CheckAndGet is called by client, It checks get args and gets the FileNode
+// according to path.
 func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAndGetArgs) (*pb.CheckAndGetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for getting fileNode for path, Path: %s", args.Path)
 	RequestCountInc(handler.SelfAddr, common.OperationGet)
@@ -465,8 +465,8 @@ func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAnd
 	return rep, nil
 }
 
-// GetDataNodes4Add Called by client.
-// Allocate some DataNode to store a Chunk and select the primary DataNode
+// GetDataNodes4Add is called by client. It allocates some DataNode to store a Chunk
+// and selects the primary DataNode.
 func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.GetDataNodes4AddArgs) (*pb.GetDataNodes4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for getting dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
 	operation := &AddOperation{
@@ -498,8 +498,7 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 	return (response.Response).(*pb.GetDataNodes4AddReply), nil
 }
 
-// GetDataNodes4Get called by client
-// find the dataNodes for the specified chunkId
+// GetDataNodes4Get is called by client. It finds the dataNodes for the specified chunkId.
 func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.GetDataNodes4GetArgs) (*pb.GetDataNodes4GetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for getting data node, FileNodeId: %s", args.FileNodeId)
 	operation := &GetOperation{
@@ -531,8 +530,7 @@ func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.Get
 	return (response.Response).(*pb.GetDataNodes4GetReply), nil
 }
 
-// ReleaseLease4Add Called by client.
-// Release the lease of a chunk.
+// ReleaseLease4Add is called by client. It releases the lease of a chunk.
 func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.ReleaseLease4AddArgs) (*pb.ReleaseLease4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
 	operation := &AddOperation{
@@ -566,8 +564,7 @@ func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.Rel
 
 }
 
-// ReleaseLease4Get Called by client.
-// Release the lease of a chunk.
+// ReleaseLease4Get is called by client. It releases the lease of a chunk.
 func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.ReleaseLease4GetArgs) (*pb.ReleaseLease4GetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
 	operation := &GetOperation{
@@ -601,8 +598,8 @@ func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.Rel
 	return rep, nil
 }
 
-// UnlockDic4Add Called by client.
-// Unlock all FileNode in the target path which is used to add file.
+// UnlockDic4Add is called by client. It unlocks all FileNode in the target path
+// which is used to add file.
 func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.UnlockDic4AddArgs) (*pb.UnlockDic4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for unlocking FileNodes in the target path from client, FileNodeId: %s", args.FileNodeId)
 	operation := &AddOperation{
@@ -636,8 +633,7 @@ func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.Unlock
 	return rep, nil
 }
 
-// CheckAndMkdir Called by client.
-// Check args and make directory at target path.
+// CheckAndMkdir is called by client. It checks args and makes directory at target path.
 func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckAndMkDirArgs) (*pb.CheckAndMkDirReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and make directory at target path from client, path: %s, dirName: %s", args.Path, args.DirName)
 	RequestCountInc(handler.SelfAddr, common.OperationMkdir)
@@ -672,8 +668,8 @@ func (handler *MasterHandler) CheckAndMkdir(ctx context.Context, args *pb.CheckA
 	return rep, nil
 }
 
-// CheckAndMove Called by client.
-// Check args and move directory or file to target path.
+// CheckAndMove is called by client. It checks args and moves directory or file
+// to target path.
 func (handler *MasterHandler) CheckAndMove(ctx context.Context, args *pb.CheckAndMoveArgs) (*pb.CheckAndMoveReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and move directory or file to target path from client, sourcePath: %s, targetPath: %s", args.SourcePath, args.TargetPath)
 	RequestCountInc(handler.SelfAddr, common.OperationMove)
@@ -708,8 +704,8 @@ func (handler *MasterHandler) CheckAndMove(ctx context.Context, args *pb.CheckAn
 	return rep, nil
 }
 
-// CheckAndRemove Called by client.
-// Check args and remove directory or file at target path.
+// CheckAndRemove is called by client. It checks args and removes directory or
+// file at target path.
 func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.CheckAndRemoveArgs) (*pb.CheckAndRemoveReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and remove directory or file at target path from client, path: %s", args.Path)
 	RequestCountInc(handler.SelfAddr, common.OperationRemove)
@@ -743,8 +739,7 @@ func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.Check
 	return rep, nil
 }
 
-// CheckAndList Called by client.
-// Check args and ls the specified directory.
+// CheckAndList is called by client. It checks args and list the specified directory.
 func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAndListArgs) (*pb.CheckAndListReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and list the specified directory, path: %s", args.Path)
 	RequestCountInc(handler.SelfAddr, common.OperationList)
@@ -769,8 +764,7 @@ func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAn
 	return rep, nil
 }
 
-// CheckAndStat Called by client.
-// Check args and return the specified file info.
+// CheckAndStat is called by client. It checks args and return the specified file info.
 func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAndStatArgs) (*pb.CheckAndStatReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and get the specified file info, path: %s", args.Path)
 	RequestCountInc(handler.SelfAddr, common.OperationStat)
@@ -798,8 +792,8 @@ func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAn
 	return rep, nil
 }
 
-// CheckAndRename Called by client.
-// Check args and rename the specified file to a new name.
+// CheckAndRename is called by client. It checks args and renames the specified
+// file to a new name.
 func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.CheckAndRenameArgs) (*pb.CheckAndRenameReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and rename the specified file to a new name, path: %s, new name: %s", args.Path, args.NewName)
 	RequestCountInc(handler.SelfAddr, common.OperationRename)
@@ -858,7 +852,8 @@ func (handler *MasterHandler) Server() {
 	server.Serve(listener)
 }
 
-// getData4Apply serializes an Operation and encapsulates the result in OpContainer and serializes OpContainer again.
+// getData4Apply serializes an Operation and encapsulates the result in OpContainer
+// and serializes OpContainer again.
 func getData4Apply(operation Operation, opType string) []byte {
 	operationBytes, _ := json.Marshal(operation)
 	opContainer := OpContainer{
