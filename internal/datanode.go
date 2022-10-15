@@ -25,22 +25,27 @@ const (
 )
 
 var (
-	// Store all DataNode, using id as the key
-	dataNodeMap    = make(map[string]*DataNode)
-	updateMapLock  = &sync.RWMutex{}
+	// dataNodeMap stores all DataNode, using id as the key.
+	dataNodeMap   = make(map[string]*DataNode)
+	updateMapLock = &sync.RWMutex{}
+	// dataNodeHeap store the first "ReplicaNum" DataNode with the least number
+	// of memory blocks.
 	dataNodeHeap   = DataNodeHeap{}
 	updateHeapLock = &sync.RWMutex{}
 )
 
+// DataNode represents a chunkserver in the file system.
 type DataNode struct {
 	Id string
-	// 0 died; 1 alive; 2 waiting
+	// status 0 died; 1 alive
 	status  int
 	Address string
-	// id of all Chunk stored in this DataNode.
+	// Chunks includes all Chunk's id stored in this DataNode.
 	Chunks mapset.Set
-	// id of all Chunk that primary DataNode is this DataNode.
-	Leases        mapset.Set
+	// Leases includes Chunk's id that primary DataNode is this DataNode.
+	Leases mapset.Set
+	// HeartbeatTime is the time when the most recent heartbeat was received for
+	// this node.
 	HeartbeatTime time.Time
 }
 
@@ -67,8 +72,8 @@ func (d *DataNode) String() string {
 	return res.String()
 }
 
-// MonitorHeartbeat Run in a goroutine.
-// This function will monitor heartbeat of all DataNode. It will scan dataNodeMap every once in a while and change the
+// MonitorHeartbeat runs in a goroutine. This function will monitor heartbeat of
+// all DataNode. It will scan dataNodeMap every once in a while and change the
 // status of DataNode which with no heartbeat for ten minutes.
 func MonitorHeartbeat(ctx context.Context) {
 	for {
@@ -89,8 +94,8 @@ func MonitorHeartbeat(ctx context.Context) {
 	}
 }
 
-// DataNodeHeap is max heap with capacity "ReplicaNum".
-// It is used to store the first "ReplicaNum" dataNodes with the least number of memory blocks.
+// DataNodeHeap is max heap with capacity "ReplicaNum". It is used to store the
+// first "ReplicaNum" DataNode with the least number of memory blocks.
 type DataNodeHeap []*DataNode
 
 func (h DataNodeHeap) Len() int {
@@ -130,9 +135,10 @@ func GetDataNode(id string) *DataNode {
 	return dataNodeMap[id]
 }
 
-// AllocateDataNodes Select several DataNode to store a Chunk. DataNode allocation strategy is:
+// AllocateDataNodes selects several DataNode to store a Chunk. DataNode allocation strategy is:
 // 1. First select the first "ReplicaNum" dataNodes with the least number of memory blocks.
-// 2. Select the node with the least number of leases from these nodes as the primary DataNode of the Chunk.
+// 2. Select the node with the least number of leases from these nodes as the primary DataNode
+//    of the Chunk.
 func AllocateDataNodes() ([]*DataNode, *DataNode) {
 	updateHeapLock.Lock()
 	allDataNodes := make([]*DataNode, dataNodeHeap.Len())
@@ -186,6 +192,8 @@ func Adjust4Add(node *DataNode) {
 	updateHeapLock.Unlock()
 }
 
+// adjust tries to put a DataNode into dataNodeHeap. If this DataNode meets the
+// requirements of dataNodeHeap, put it into dataNodeHeap, otherwise do nothing.
 func adjust(node *DataNode) {
 	if dataNodeHeap.Len() < viper.GetInt(common.ReplicaNum) {
 		dataNodeHeap.Push(node)
@@ -210,6 +218,7 @@ func ReleaseLease(dataNodeId string, chunkId string) error {
 	return nil
 }
 
+// PersistDataNodes writes all DataNode in dataNodeMap to the sink for persistence.
 func PersistDataNodes(sink raft.SnapshotSink) error {
 	for _, dataNode := range dataNodeMap {
 		_, err := sink.Write([]byte(dataNode.String()))
@@ -224,6 +233,7 @@ func PersistDataNodes(sink raft.SnapshotSink) error {
 	return nil
 }
 
+// RestoreDataNodes reads all DataNode from the buf and puts them into dataNodeMap.
 func RestoreDataNodes(buf *bufio.Scanner) error {
 	var (
 		chunks = mapset.NewSet()

@@ -36,37 +36,47 @@ const (
 )
 
 var (
-	// The root of the directory tree.
+	// root is the root of the directory tree. The directory tree only exposes
+	// root to the outside. All operations on the directory tree take root as
+	// the entry. Access to this node must also be via the provided public methods
+	// in this file.
 	root = &FileNode{
 		Id:             util.GenerateUUIDString(),
 		FileName:       rootFileName,
 		ChildNodes:     make(map[string]*FileNode),
 		UpdateNodeLock: &sync.RWMutex{},
 	}
-	// Store all locked nodes.
-	// All nodes locked by an operation will be placed on a stack as the value of the map.
-	// The id of the FileNode being operated is used as the key.
+	// lockedFileNodes includes all locked nodes. All nodes locked by an operation
+	// will be placed on a stack as the value of the map. The id of the FileNode
+	// being operated is used as the key.
 	lockedFileNodes  = make(map[string]*list.List)
 	fileNodesMapLock = &sync.Mutex{}
 )
 
+// FileNode represents a file or directory in the file system.
 type FileNode struct {
 	Id         string
 	FileName   string
 	ParentNode *FileNode
-	// all child node of this node, using FileName as key
+	// ChildNodes includes all child FileNode of this node, using FileName as key.
 	ChildNodes map[string]*FileNode
-	// id of all Chunk in this file.
+	// Chunks is id of all Chunk in this file.
 	Chunks []string
-	// size of the file. Use bytes as the unit of measurement which means 1kb will be 1024.
-	Size           int64
-	IsFile         bool
+	// Size is the size of the file. Use bytes as the unit of measurement which
+	// means 1kb will be 1024. The size of the directory is 0.
+	Size   int64
+	IsFile bool
+	// DelTime represents the last time this FileNode was deleted. It is used to
+	// determine whether this FileNode can be permanently deleted.
 	DelTime        *time.Time
 	IsDel          bool
 	UpdateNodeLock *sync.RWMutex
-	LastLockTime   time.Time
+	// LastLockTime represents the last time this FileNode was locked. It is used
+	// to determine whether active unlocking is required.
+	LastLockTime time.Time
 }
 
+// CheckAndGetFileNode gets a FileNode by given path if the given path is legal.
 func CheckAndGetFileNode(path string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, true)
 	if !isExist {
@@ -76,6 +86,9 @@ func CheckAndGetFileNode(path string) (*FileNode, error) {
 	return fileNode, nil
 }
 
+// getAndLockByPath gets target FileNode and lock all FileNode from the root to
+// target FileNode by given path. The type of target node being locked depends
+// on the isRead parameter; all the other FileNode will be locked as read lock.
 func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 	currentNode := root
 	path = strings.Trim(path, pathSplitString)
@@ -114,6 +127,7 @@ func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
 	return currentNode, stack, true
 }
 
+// unlockAllMutex unlocks all FileNode in the given stack.
 func unlockAllMutex(stack *list.List, isRead bool) {
 	firstElement := stack.Back()
 	firstNode := firstElement.Value.(*FileNode)
@@ -132,6 +146,7 @@ func unlockAllMutex(stack *list.List, isRead bool) {
 	}
 }
 
+// UnlockFileNodesById gets stack by fileNodeId and unlock all FileNode in that stack.
 func UnlockFileNodesById(fileNodeId string, isRead bool) error {
 	fileNodesMapLock.Lock()
 	stack, ok := lockedFileNodes[fileNodeId]
@@ -144,6 +159,9 @@ func UnlockFileNodesById(fileNodeId string, isRead bool) error {
 	return nil
 }
 
+// AddFileNode add a FileNode to directory tree. It is generally used to add a
+// directory because it will unlock all FileNode after adding the FileNode to
+// directory tree.
 func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
 	if !isExist || fileNode.IsFile {
@@ -176,6 +194,9 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 	return newNode, nil
 }
 
+// LockAndAddFileNode add a FileNode to directory tree without unlock any FileNode.
+// It is generally used to add a file. After calling this method, we must call
+// UnlockFileNodesById to unlock all FileNode.
 func LockAndAddFileNode(id string, path string, filename string, size int64, isFile bool) (*FileNode, *list.List, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
 	if !isExist || fileNode.IsFile {
@@ -214,6 +235,7 @@ func initChunks(size int64, id string) []string {
 	return chunks
 }
 
+// MoveFileNode move a FileNode to target path.
 func MoveFileNode(currentPath string, targetPath string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(currentPath, false)
 	newParentNode, parentStack, isParentExist := getAndLockByPath(targetPath, false)
@@ -235,6 +257,11 @@ func MoveFileNode(currentPath string, targetPath string) (*FileNode, error) {
 	return fileNode, nil
 }
 
+// RemoveFileNode remove a FileNode from file system. It should be noted that
+// this method is dummy delete, and does not actually remove the FileNode from
+// the directory tree. This method will prefix the node's name with "delete"
+// and update isDel and delTime of the FileNode. The delete state will be
+// canceled when the user renames the FileNode within a certain period of time.
 func RemoveFileNode(path string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
 	if !isExist {
@@ -252,9 +279,11 @@ func RemoveFileNode(path string) (*FileNode, error) {
 	return fileNode, nil
 }
 
+// ListFileNode get a slice including all FileNode under the specified path.
+// The path must be a directory not a file.
 func ListFileNode(path string) ([]*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, true)
-	if !isExist {
+	if !isExist || fileNode.IsFile {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
 	defer unlockAllMutex(stack, true)
@@ -268,6 +297,7 @@ func ListFileNode(path string) ([]*FileNode, error) {
 	return fileNodes, nil
 }
 
+// RenameFileNode rename a FileNode to given name.
 func RenameFileNode(path string, newName string) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
 	if !isExist {
@@ -309,7 +339,7 @@ func (f *FileNode) String() string {
 	return res.String()
 }
 
-// IsDeepEqualTo is used to compare two FileNode
+// IsDeepEqualTo is used to compare two FileNode.
 func (f *FileNode) IsDeepEqualTo(t *FileNode) bool {
 	arr1 := make([]*FileNode, 0)
 	arr2 := make([]*FileNode, 0)
@@ -344,6 +374,8 @@ func (f *FileNode) add2Arr(arr *[]*FileNode) {
 	}
 }
 
+// PersistDirTree writes all FileNode in the directory tree to the sink for
+// persistence.
 func PersistDirTree(sink raft.SnapshotSink) error {
 	queue := list.New()
 	queue.PushBack(root)
@@ -369,6 +401,7 @@ func PersistDirTree(sink raft.SnapshotSink) error {
 	return nil
 }
 
+// RestoreDirTree restore the directory tree from buf.
 func RestoreDirTree(buf *bufio.Scanner) error {
 	logrus.Println("Start to restore directory tree.")
 	rootMap := ReadDirTree(buf)
@@ -379,7 +412,7 @@ func RestoreDirTree(buf *bufio.Scanner) error {
 	return nil
 }
 
-// ReadDirTree returns map whose key is the id of the FileNode rather than filename
+// ReadDirTree reads all FileNode from the buf and puts them into a map.
 func ReadDirTree(buf *bufio.Scanner) map[string]*FileNode {
 	res := map[string]*FileNode{}
 	for buf.Scan() {
@@ -441,7 +474,7 @@ func ReadDirTree(buf *bufio.Scanner) map[string]*FileNode {
 	return res
 }
 
-// RootDeserialize reads the snapshot and rebuild the directory.
+// RootDeserialize rebuild the directory tree from rootMap.
 func RootDeserialize(rootMap map[string]*FileNode) *FileNode {
 	// Look for root
 	newRoot := &FileNode{}

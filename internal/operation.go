@@ -31,7 +31,8 @@ func init() {
 	OpTypeMap[common.OperationRename] = reflect.TypeOf(RenameOperation{})
 }
 
-// Operation represents requests to make changes to metadata.
+// Operation represents requests to make changes to metadata. If we want to modify the metadata,
+// we must implement this interface and put the modification process in the Apply method.
 type Operation interface {
 	// Apply will perform modifications to the metadata. Calling it in the MasterFSM can ensure
 	// the consistency of the metadata modification of the master cluster.

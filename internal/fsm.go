@@ -8,16 +8,18 @@ import (
 	"reflect"
 )
 
+// ApplyResponse is the reply of MasterFSM's Apply function.
 type ApplyResponse struct {
 	Response interface{}
 	Error    error
 }
 
-// MasterFSM implement FSM and make use of the replicated log.
+// MasterFSM implements FSM and make use of the replicated log.
 type MasterFSM struct {
 }
 
-// Apply call Apply function of operation, changes to metadata will be made in that function.
+// Apply calls Apply function of operation, changes to metadata will be made
+// in that function.
 func (ms MasterFSM) Apply(l *raft.Log) interface{} {
 	operation := ConvBytes2Operation(l.Data)
 	response, err := operation.Apply()
@@ -27,7 +29,7 @@ func (ms MasterFSM) Apply(l *raft.Log) interface{} {
 	}
 }
 
-// ConvBytes2Operation Use reflect to restore operation from data
+// ConvBytes2Operation uses reflect to restore operation from data.
 func ConvBytes2Operation(data []byte) Operation {
 	opContainer := OpContainer{}
 	var operation Operation
@@ -47,6 +49,8 @@ func (ms MasterFSM) Snapshot() (raft.FSMSnapshot, error) {
 	return &snapshot{}, nil
 }
 
+// Restore read snapshot and restore metadata from it. There are three part of metadata
+// need to be restored: directory tree, DataNode information and Chunk information
 func (ms MasterFSM) Restore(r io.ReadCloser) error {
 	buf := bufio.NewScanner(r)
 	err := RestoreDirTree(buf)
@@ -67,7 +71,7 @@ func (ms MasterFSM) Restore(r io.ReadCloser) error {
 type snapshot struct {
 }
 
-// Persist Take a snapshot of current metadata.
+// Persist Take a snapshot of current metadata and save it as a file.
 func (s *snapshot) Persist(sink raft.SnapshotSink) error {
 	err := PersistDirTree(sink)
 	if err != nil {
