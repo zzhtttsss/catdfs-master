@@ -61,6 +61,10 @@ func (ms MasterFSM) Restore(r io.ReadCloser) error {
 	if err != nil {
 		return err
 	}
+	err = RestoreDeadChunkQueue(buf)
+	if err != nil {
+		return err
+	}
 	return r.Close()
 }
 
@@ -78,6 +82,10 @@ func (s *snapshot) Persist(sink raft.SnapshotSink) error {
 		return err
 	}
 	err = PersistChunks(sink)
+	if err != nil {
+		return err
+	}
+	err = PersistDeadChunkQueue(sink)
 	if err != nil {
 		return err
 	}

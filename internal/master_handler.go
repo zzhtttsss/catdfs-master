@@ -10,6 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -250,6 +251,7 @@ func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 				handler.FollowerStateObserver = getFollowerStateObserver()
 				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
 				go MonitorHeartbeat(subContext)
+				go MonitorDeadChunk(subContext)
 				logrus.Infof("Become leader, success to change etcd leader infomation and monitor datanodes")
 			} else {
 				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
@@ -331,7 +333,6 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 			Code: common.MasterHeartbeatFailed,
 			Msg:  err.Error(),
 		})
-		csCountMonitor.Dec()
 		return nil, details.Err()
 	}
 	response := (applyFuture.Response()).(*ApplyResponse)
@@ -791,6 +792,26 @@ func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.Check
 	logrus.WithContext(ctx).Infof("Success to check args and rename the specified file to a new name, path: %s", args.Path)
 	SuccessCountInc(handler.SelfAddr, common.OperationRename)
 	return rep, nil
+}
+
+type TransferDataNode struct {
+	fromDataNodeId string
+	toDataNodeId   string
+}
+
+// Shrink called by master.
+// It will put all the chunks in the dies datanode to other alive datanodes
+func (handler *MasterHandler) Shrink(diedNode *DataNode) {
+	logrus.Infof("DataNode[%s] is died. Its chunks are added to shrink queue", diedNode.Id)
+	for _, chunkId := range diedNode.Chunks.ToSlice() {
+		if deadChunk == nil {
+			deadChunk = &DeadChunkQueue{
+				queue: util.NewQueue[String](),
+				state: atomic.NewUint32(Waiting),
+			}
+		}
+		deadChunk.queue.Push(String(chunkId.(string)))
+	}
 }
 
 func (handler *MasterHandler) Server() {

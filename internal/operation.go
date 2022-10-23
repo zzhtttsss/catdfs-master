@@ -29,6 +29,9 @@ func init() {
 	OpTypeMap[common.OperationList] = reflect.TypeOf(ListOperation{})
 	OpTypeMap[common.OperationStat] = reflect.TypeOf(StatOperation{})
 	OpTypeMap[common.OperationRename] = reflect.TypeOf(RenameOperation{})
+	OpTypeMap[common.OperationShrink] = reflect.TypeOf(ShrinkOperation{})
+	OpTypeMap[common.OperationExpand] = reflect.TypeOf(ExpandOperation{})
+	OpTypeMap[common.OperationDeregister] = reflect.TypeOf(DeregisterOperation{})
 }
 
 // Operation represents requests to make changes to metadata.
@@ -78,6 +81,7 @@ func (o HeartbeatOperation) Apply() (interface{}, error) {
 	logrus.Infof("heartbeat, id: %s", o.DataNodeId)
 	if dataNode := GetDataNode(o.DataNodeId); dataNode != nil {
 		dataNode.HeartbeatTime = time.Now()
+		dataNode.status = common.Alive
 		return nil, nil
 	}
 	return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
@@ -259,4 +263,29 @@ func fileNode2FileInfo(nodes []*FileNode) []*pb.FileInfo {
 		}
 	}
 	return files
+}
+
+type DeregisterOperation struct {
+	Id         string `json:"id"`
+	DataNodeId string `json:"dataNodeId"`
+}
+
+func (d DeregisterOperation) Apply() (interface{}, error) {
+	RemoveDataNode(d.DataNodeId)
+	return nil, nil
+}
+
+type ShrinkOperation struct {
+	Id            string `json:"id"`
+	ShrinkChunkId string `json:"shrinkChunkId"`
+	FromDataNode  string `json:"fromDataNode"`
+	ToDataNodes   string `json:"toDataNode"`
+}
+
+func (o ShrinkOperation) Apply() (interface{}, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+type ExpandOperation struct {
 }
