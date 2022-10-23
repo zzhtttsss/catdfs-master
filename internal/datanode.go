@@ -114,8 +114,6 @@ func MonitorHeartbeat(ctx context.Context) {
 
 // DataNodeHeap is max heap with capacity "ReplicaNum". It is used to store the
 // first "ReplicaNum" DataNode with the least number of memory blocks.
-type DataNodeHeap []*DataNode
-// DataNodeHeap is a heap using strategy pattern to specify whether it is a max heap or a min heap.
 type DataNodeHeap struct {
 	dns  []*DataNode
 	less LessStrategy
