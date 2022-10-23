@@ -147,25 +147,23 @@ func RestoreDeadChunkQueue(buf *bufio.Scanner) error {
 // This function will monitor dead chunk queue.
 // Start copy chunks when timer elapse or the number of dead chunks equals to #{ChunkDeadChunkCopyThreshold}
 func MonitorDeadChunk(ctx context.Context) {
-	subContext, subCancel := context.WithCancel(ctx)
 	if deadChunk.queue.Len() > 0 && deadChunk.state.CAS(Waiting, Processing) {
-		go DuplicateDeadChunk(subContext)
+		go DuplicateDeadChunk()
 	}
 	timer := time.NewTicker(time.Duration(viper.GetInt(common.ChunkDeadChunkCheckTime)) * time.Second)
 	for {
 		select {
 		case <-timer.C:
 			if deadChunk.state.CAS(Waiting, Processing) {
-				go DuplicateDeadChunk(subContext)
+				go DuplicateDeadChunk()
 			}
 		case <-ctx.Done():
 			timer.Stop()
-			subCancel()
 			return
 		default:
 			if deadChunk.queue.Len() >= viper.GetInt(common.ChunkDeadChunkCopyThreshold) {
 				if deadChunk.state.CAS(Waiting, Processing) {
-					go DuplicateDeadChunk(subContext)
+					go DuplicateDeadChunk()
 				}
 			}
 			time.Sleep(time.Second)
@@ -183,7 +181,7 @@ func MonitorDeadChunk(ctx context.Context) {
 // 解决办法：新leader检查deadChunk的queue数量，如果里面有，直接进行保存。(后果可能会造成某些chunk多存储一份)
 // 问题2. 由于先进行复制，后写log，所以会造成log没有写完，但chunk已经复制完毕的情况。因此，活着的dataNode的chunkMap
 // 是和机器上实际情况不匹配的。但新leader的copy过程执行完毕且apply之后，会解决这个问题。
-func DuplicateDeadChunk(ctx context.Context) {
+func DuplicateDeadChunk() {
 	var (
 		maxCount  = viper.GetInt(common.ChunkDeadChunkCopyThreshold)
 		copyCount int
