@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bufio"
+	"container/heap"
 	"context"
 	"fmt"
 	mapset "github.com/deckarep/golang-set"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 	"tinydfs-base/common"
+	"tinydfs-base/util"
 )
 
 const (
@@ -25,12 +27,15 @@ const (
 )
 
 var (
-	// dataNodeMap stores all DataNode, using id as the key.
+	// Store all DataNode, using id as the key
 	dataNodeMap   = make(map[string]*DataNode)
 	updateMapLock = &sync.RWMutex{}
-	// dataNodeHeap store the first "ReplicaNum" DataNode with the least number
-	// of memory blocks.
-	dataNodeHeap   = DataNodeHeap{}
+	//a heap with capacity "ReplicaNum". It is used to store the first "ReplicaNum" dataNodes
+	// with the least number of memory blocks.
+	dataNodeHeap = DataNodeHeap{
+		dns:  make([]*DataNode, 0),
+		less: &MaxHeapFunc{},
+	}
 	updateHeapLock = &sync.RWMutex{}
 )
 
@@ -81,8 +86,21 @@ func MonitorHeartbeat(ctx context.Context) {
 		default:
 			updateMapLock.Lock()
 			for _, node := range dataNodeMap {
+				// give died datanode a second chance to restart.
 				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) {
 					node.status = common.Died
+					continue
+				}
+				// if node is still died, master will move all chunks belonging to this node.
+				if node.status == common.Died {
+					csCountMonitor.Dec()
+					GlobalMasterHandler.Shrink(node)
+					operation := &DeregisterOperation{
+						Id:         util.GenerateUUIDString(),
+						DataNodeId: node.Id,
+					}
+					data := getData4Apply(operation, common.OperationDeregister)
+					_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
 				}
 			}
 			updateMapLock.Unlock()
@@ -97,44 +115,64 @@ func MonitorHeartbeat(ctx context.Context) {
 // DataNodeHeap is max heap with capacity "ReplicaNum". It is used to store the
 // first "ReplicaNum" DataNode with the least number of memory blocks.
 type DataNodeHeap []*DataNode
-
-func (h DataNodeHeap) Len() int {
-	return len(h)
+// DataNodeHeap is a heap using strategy pattern to specify whether it is a max heap or a min heap.
+type DataNodeHeap struct {
+	dns  []*DataNode
+	less LessStrategy
 }
 
-func (h DataNodeHeap) Less(i, j int) bool {
+type LessStrategy interface {
+	LessFunc(h []*DataNode, i int, j int) bool
+}
+
+type MaxHeapFunc struct{}
+
+func (m *MaxHeapFunc) LessFunc(h []*DataNode, i int, j int) bool {
 	return h[i].Chunks.Cardinality() > h[j].Chunks.Cardinality()
 }
 
+func (h DataNodeHeap) Len() int {
+	return len(h.dns)
+}
+
+func (h DataNodeHeap) Less(i, j int) bool {
+	return h.less.LessFunc(h.dns, i, j)
+}
+
 func (h DataNodeHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
+	h.dns[i], h.dns[j] = h.dns[j], h.dns[i]
 }
 
 func (h *DataNodeHeap) Push(v interface{}) {
-	*h = append(*h, v.(*DataNode))
+	h.dns = append(h.dns, v.(*DataNode))
 }
 
 func (h *DataNodeHeap) Pop() interface{} {
-	last := len(*h) - 1
-	v := (*h)[last]
-	*h = (*h)[:last]
+	last := len(h.dns) - 1
+	v := h.dns[last]
+	h.dns = h.dns[:last]
 	return v
 }
 
 func AddDataNode(datanode *DataNode) {
 	updateMapLock.Lock()
+	defer updateMapLock.Unlock()
 	dataNodeMap[datanode.Id] = datanode
-	updateMapLock.Unlock()
 }
 
 func GetDataNode(id string) *DataNode {
 	updateMapLock.RLock()
-	defer func() {
-		updateMapLock.RUnlock()
-	}()
+	defer updateMapLock.RUnlock()
 	return dataNodeMap[id]
 }
 
+func RemoveDataNode(dataNodeId string) {
+	updateMapLock.Lock()
+	defer updateMapLock.Unlock()
+	delete(dataNodeMap, dataNodeId)
+}
+
+// AllocateDataNodes Select several DataNode to store a Chunk. DataNode allocation strategy is:
 // AllocateDataNodes selects several DataNode to store a Chunk. DataNode allocation strategy is:
 // 1. First select the first "ReplicaNum" dataNodes with the least number of memory blocks.
 // 2. Select the node with the least number of leases from these nodes as the primary DataNode
@@ -142,7 +180,7 @@ func GetDataNode(id string) *DataNode {
 func AllocateDataNodes() ([]*DataNode, *DataNode) {
 	updateHeapLock.Lock()
 	allDataNodes := make([]*DataNode, dataNodeHeap.Len())
-	copy(allDataNodes, dataNodeHeap)
+	copy(allDataNodes, dataNodeHeap.dns)
 	updateHeapLock.Unlock()
 	// TODO if there is no chunkserver in system, it will cause a panic.
 	primaryNode := allDataNodes[0]
@@ -171,7 +209,7 @@ func RemoveChunk(chunkId string, node *DataNode) {
 func adjust4Allocate() {
 	updateMapLock.RLock()
 	updateHeapLock.Lock()
-	dataNodeHeap = dataNodeHeap[0:0]
+	dataNodeHeap.dns = dataNodeHeap.dns[0:0]
 	for _, node := range dataNodeMap {
 		adjust(node)
 	}
@@ -196,13 +234,13 @@ func Adjust4Add(node *DataNode) {
 // requirements of dataNodeHeap, put it into dataNodeHeap, otherwise do nothing.
 func adjust(node *DataNode) {
 	if dataNodeHeap.Len() < viper.GetInt(common.ReplicaNum) {
-		dataNodeHeap.Push(node)
+		heap.Push(&dataNodeHeap, node)
 	} else {
-		topNode := dataNodeHeap.Pop().(*DataNode)
+		topNode := heap.Pop(&dataNodeHeap).(*DataNode)
 		if topNode.Chunks.Cardinality() > node.Chunks.Cardinality() {
-			dataNodeHeap.Push(node)
+			heap.Push(&dataNodeHeap, node)
 		} else {
-			dataNodeHeap.Push(topNode)
+			heap.Push(&dataNodeHeap, topNode)
 		}
 	}
 }

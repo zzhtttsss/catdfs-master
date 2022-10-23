@@ -9,6 +9,8 @@ chunk:
   checkTime: 180
   dieTime: 600     # chunkserver died time
   replicaNum: 3   # number of replica that a chunk will be store
+  deadChunkCheckTime: 180  # dead chunk will be copied every 180s
+  deadChunkCopyThreshold: 32  # dead chunk will be copied when count is 32 or more
 
 # etcd config
 etcd:
