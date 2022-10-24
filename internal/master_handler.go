@@ -10,7 +10,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"go.etcd.io/etcd/client/v3"
-	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -292,7 +291,7 @@ func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 				handler.FollowerStateObserver = getFollowerStateObserver()
 				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
 				go MonitorHeartbeat(subContext)
-				go MonitorDeadChunk(subContext)
+				go MonitorPendingChunk(subContext)
 				logrus.Infof("Become leader, success to change etcd leader infomation and monitor datanodes")
 			} else {
 				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
@@ -365,6 +364,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		Id:         util.GenerateUUIDString(),
 		DataNodeId: args.Id,
 		ChunkIds:   args.ChunkId,
+		IOLoad:     args.IOLoad,
 	}
 	data := getData4Apply(operation, common.OperationHeartbeat)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
@@ -529,74 +529,6 @@ func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.Get
 	}
 	logrus.WithContext(ctx).Infof("Success to get dataNodes for get operation, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
 	return (response.Response).(*pb.GetDataNodes4GetReply), nil
-}
-
-// ReleaseLease4Add is called by client. It releases the lease of a chunk.
-func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.ReleaseLease4AddArgs) (*pb.ReleaseLease4AddReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
-	operation := &AddOperation{
-		Id:      util.GenerateUUIDString(),
-		ChunkId: args.ChunkId,
-		Stage:   common.ReleaseLease,
-	}
-	data := getData4Apply(operation, common.OperationAdd)
-	applyFuture := handler.Raft.Apply(data, 5*time.Second)
-	if err := applyFuture.Error(); err != nil {
-		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4AddFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterReleaseLease4AddFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-	response := (applyFuture.Response()).(*ApplyResponse)
-	if err := response.Error; err != nil {
-		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4AddFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterReleaseLease4AddFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-
-	rep := &pb.ReleaseLease4AddReply{}
-	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
-	return rep, nil
-
-}
-
-// ReleaseLease4Get is called by client. It releases the lease of a chunk.
-func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.ReleaseLease4GetArgs) (*pb.ReleaseLease4GetReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
-	operation := &GetOperation{
-		Id:      util.GenerateUUIDString(),
-		ChunkId: args.ChunkId,
-		Stage:   common.ReleaseLease,
-	}
-	data := getData4Apply(operation, common.OperationGet)
-	applyFuture := handler.Raft.Apply(data, 5*time.Second)
-	if err := applyFuture.Error(); err != nil {
-		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4GetFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterReleaseLease4GetFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-	response := (applyFuture.Response()).(*ApplyResponse)
-	if err := response.Error; err != nil {
-		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4GetFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterReleaseLease4GetFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-
-	rep := &pb.ReleaseLease4GetReply{}
-	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
-	SuccessCountInc(handler.SelfAddr, common.OperationGet)
-	return rep, nil
 }
 
 // UnlockDic4Add is called by client. It unlocks all FileNode in the target path
@@ -832,21 +764,6 @@ func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.Check
 type TransferDataNode struct {
 	fromDataNodeId string
 	toDataNodeId   string
-}
-
-// Shrink called by master.
-// It will put all the chunks in the dies datanode to other alive datanodes
-func (handler *MasterHandler) Shrink(diedNode *DataNode) {
-	logrus.Infof("DataNode[%s] is died. Its chunks are added to shrink queue", diedNode.Id)
-	for _, chunkId := range diedNode.Chunks.ToSlice() {
-		if deadChunk == nil {
-			deadChunk = &DeadChunkQueue{
-				queue: util.NewQueue[String](),
-				state: atomic.NewUint32(Waiting),
-			}
-		}
-		deadChunk.queue.Push(String(chunkId.(string)))
-	}
 }
 
 func (handler *MasterHandler) Server() {

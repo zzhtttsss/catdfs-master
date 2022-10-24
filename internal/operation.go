@@ -62,12 +62,11 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 		status:        common.Alive,
 		Address:       o.Address,
 		Chunks:        set.NewSet(),
-		Leases:        set.NewSet(),
+		IOLoad:        0,
 		HeartbeatTime: time.Now(),
 	}
 
 	AddDataNode(datanode)
-	Adjust4Add(datanode)
 	logrus.Infof("[Id=%s] Connected", o.DataNodeId)
 	return o.DataNodeId, nil
 }
@@ -76,6 +75,7 @@ type HeartbeatOperation struct {
 	Id         string   `json:"id"`
 	DataNodeId string   `json:"data_node_id"`
 	ChunkIds   []string `json:"chunkIds"`
+	IOLoad     int64    `json:"io_load"`
 }
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
@@ -83,6 +83,7 @@ func (o HeartbeatOperation) Apply() (interface{}, error) {
 	if dataNode := GetDataNode(o.DataNodeId); dataNode != nil {
 		dataNode.HeartbeatTime = time.Now()
 		dataNode.status = common.Alive
+		dataNode.IOLoad = int(o.IOLoad)
 		return nil, nil
 	}
 	return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
@@ -116,33 +117,26 @@ func (o AddOperation) Apply() (interface{}, error) {
 		return rep, nil
 	case common.GetDataNodes:
 		chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.Itoa(int(o.ChunkIndex))
-		dataNodes, primaryNode := AllocateDataNodes()
+		dataNodes := AllocateDataNodes()
 		var (
-			dataNodeIds   = make([]string, len(dataNodes))
+			dataNodeIds   = set.NewSet()
 			dataNodeAddrs = make([]string, len(dataNodes))
 		)
 		for i, node := range dataNodes {
 			node.Chunks.Add(chunkId)
-			dataNodeIds[i] = node.Id
+			dataNodeIds.Add(node.Id)
 			dataNodeAddrs[i] = node.Address
 		}
-		primaryNode.Leases.Add(chunkId)
 
 		chunk := &Chunk{
-			Id:          chunkId,
-			dataNodes:   dataNodeIds,
-			primaryNode: primaryNode.Id,
+			Id:               chunkId,
+			pendingDataNodes: dataNodeIds,
 		}
 		AddChunk(chunk)
 		rep := &pb.GetDataNodes4AddReply{
-			DataNodes:   dataNodeAddrs,
-			PrimaryNode: primaryNode.Address,
+			DataNodes: dataNodeAddrs,
 		}
 		return rep, nil
-	case common.ReleaseLease:
-		chunk := GetChunk(o.ChunkId)
-		err := ReleaseLease(chunk.primaryNode, o.ChunkId)
-		return nil, err
 	case common.UnlockDic:
 		err := UnlockFileNodesById(o.FileNodeId, false)
 		return nil, err
@@ -168,23 +162,13 @@ func (o GetOperation) Apply() (interface{}, error) {
 	case common.GetDataNodes:
 		chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.FormatInt(int64(o.ChunkIndex), 10)
 		chunk := GetChunk(chunkId)
-		dataNodeIds := make([]string, len(chunk.dataNodes))
-		dataNodeAddrs := make([]string, len(chunk.dataNodes))
-		for i, nodeId := range chunk.dataNodes {
-			dataNode := GetDataNode(nodeId)
-			dataNodeIds[i] = dataNode.Id
-			dataNodeAddrs[i] = dataNode.Address
-		}
+		dataNodeIds, dataNodeAddrs := GetSortedDataNodeIds(chunk.dataNodes)
 		rep := &pb.GetDataNodes4GetReply{
 			DataNodeIds:   dataNodeIds,
 			DataNodeAddrs: dataNodeAddrs,
 			ChunkIndex:    o.ChunkIndex,
 		}
 		return rep, nil
-	case common.ReleaseLease:
-		chunk := GetChunk(o.ChunkId)
-		err := ReleaseLease(chunk.primaryNode, o.ChunkId)
-		return nil, err
 	default:
 		return nil, nil
 	}

@@ -5,10 +5,11 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
-	mapset "github.com/deckarep/golang-set"
+	set "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,17 +22,20 @@ const (
 	dataNodeIdIdx = iota
 	statusIdx
 	addressIdx
-	DNChunksIdx
-	leaseIdx
+	dnChunksIdx
+	ioLoadIdx
 	heartbeatIdx
 )
 
 var (
-	// Store all DataNode, using id as the key
+	// dataNodeMap stores all DataNode in this system, using id as the key.
 	dataNodeMap   = make(map[string]*DataNode)
 	updateMapLock = &sync.RWMutex{}
-	//a heap with capacity "ReplicaNum". It is used to store the first "ReplicaNum" dataNodes
-	// with the least number of memory blocks.
+	// dataNodeHeap is a max heap with capacity "ReplicaNum". It is used to store
+	// the first "ReplicaNum" dataNodes with the least number of memory blocks.
+	// This heap will not actively keep the latest status. So if you want to get
+	// the latest dataNodeHeap, you must call AllocateDataNodes to update dataNodeHeap
+	// first.
 	dataNodeHeap = DataNodeHeap{
 		dns:  make([]*DataNode, 0),
 		less: &MaxHeapFunc{},
@@ -46,9 +50,13 @@ type DataNode struct {
 	status  int
 	Address string
 	// Chunks includes all Chunk's id stored in this DataNode.
-	Chunks mapset.Set
-	// Leases includes Chunk's id that primary DataNode is this DataNode.
-	Leases mapset.Set
+	Chunks set.Set
+	// Deprecated: Leases includes Chunk's id that primary DataNode is this DataNode.
+	Leases set.Set
+	// IOLoad represents IO load of a DataNode. It is flushed by DataNode's heartbeat,
+	// so it will have a delay of a few seconds.
+	IOLoad           int
+	FutureSendChunks set.Set
 	// HeartbeatTime is the time when the most recent heartbeat was received for
 	// this node.
 	HeartbeatTime time.Time
@@ -64,16 +72,8 @@ func (d *DataNode) String() string {
 		index++
 	}
 
-	leases := make([]string, d.Leases.Cardinality())
-	leaseChan := d.Leases.Iter()
-	index = 0
-	for chunkId := range leaseChan {
-		leases[index] = chunkId.(string)
-		index++
-	}
-
 	res.WriteString(fmt.Sprintf("%s$%v$%s$%v$%v$%s\n",
-		d.Id, d.status, d.Address, chunks, leases, d.HeartbeatTime.Format(common.LogFileTimeFormat)))
+		d.Id, d.status, d.Address, chunks, d.IOLoad, d.HeartbeatTime.Format(common.LogFileTimeFormat)))
 	return res.String()
 }
 
@@ -87,20 +87,22 @@ func MonitorHeartbeat(ctx context.Context) {
 			updateMapLock.Lock()
 			for _, node := range dataNodeMap {
 				// give died datanode a second chance to restart.
-				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) {
-					node.status = common.Died
+				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkWaitingTime)*
+					viper.GetInt(common.ChunkHeartbeatTime) || node.status == common.Alive {
+					node.status = common.Waiting
 					continue
 				}
-				// if node is still died, master will move all chunks belonging to this node.
-				if node.status == common.Died {
+				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) ||
+					node.status == common.Waiting {
+					node.status = common.Died
 					csCountMonitor.Dec()
-					GlobalMasterHandler.Shrink(node)
 					operation := &DeregisterOperation{
 						Id:         util.GenerateUUIDString(),
 						DataNodeId: node.Id,
 					}
 					data := getData4Apply(operation, common.OperationDeregister)
 					_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+					continue
 				}
 			}
 			updateMapLock.Unlock()
@@ -164,68 +166,106 @@ func GetDataNode(id string) *DataNode {
 	return dataNodeMap[id]
 }
 
+func GetDataNodeIds() []string {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	ids := make([]string, 0, len(dataNodeMap))
+	for id, node := range dataNodeMap {
+		if node.status == common.Alive {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func GetSortedDataNodeIds(set set.Set) ([]string, []string) {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	setChan := set.Iter()
+
+	dns := make([]*DataNode, 0, set.Cardinality())
+	index := 0
+	for id := range setChan {
+		dns[index] = dataNodeMap[id.(string)]
+		index++
+	}
+	sort.SliceStable(dns, func(i, j int) bool {
+		if dns[i].IOLoad < dns[j].IOLoad {
+			return true
+		}
+		return false
+	})
+	ids := make([]string, len(dns))
+	adds := make([]string, len(dns))
+	for i, dn := range dns {
+		ids[i] = dn.Id
+		adds[i] = dn.Address
+	}
+	return ids, adds
+}
+
+func GetAliveDataNodeIds() []string {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	ids := make([]string, 0, len(dataNodeMap))
+	for id, node := range dataNodeMap {
+		if node.status == common.Alive {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// BatchAllocateDataNode use the given plan to allocate Chunk for each DataNode.
+func BatchAllocateDataNode(receiverPlan []int, senderPlan []int, chunkIds []string, dataNodeIds []string) {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	for i, dnIndex := range senderPlan {
+		chunkSendInfo := &ChunkSendInfo{
+			chunkId:          chunkIds[i],
+			targetDataNodeId: dataNodeIds[receiverPlan[i]],
+		}
+		dataNodeMap[dataNodeIds[dnIndex]].FutureSendChunks.Add(chunkSendInfo)
+	}
+}
+
+type ChunkSendInfo struct {
+	chunkId          string
+	targetDataNodeId string
+	state            int
+}
+
 func RemoveDataNode(dataNodeId string) {
 	updateMapLock.Lock()
 	defer updateMapLock.Unlock()
+	diedNode, ok := dataNodeMap[dataNodeId]
+	if !ok {
+		return
+	}
 	delete(dataNodeMap, dataNodeId)
+	for _, chunkId := range diedNode.Chunks.ToSlice() {
+		pendingChunkQueue.Push(String(chunkId.(string)))
+	}
 }
 
 // AllocateDataNodes Select several DataNode to store a Chunk. DataNode allocation strategy is:
-// AllocateDataNodes selects several DataNode to store a Chunk. DataNode allocation strategy is:
-// 1. First select the first "ReplicaNum" dataNodes with the least number of memory blocks.
-// 2. Select the node with the least number of leases from these nodes as the primary DataNode
-//    of the Chunk.
-func AllocateDataNodes() ([]*DataNode, *DataNode) {
-	updateHeapLock.Lock()
-	allDataNodes := make([]*DataNode, dataNodeHeap.Len())
-	copy(allDataNodes, dataNodeHeap.dns)
-	updateHeapLock.Unlock()
-	// TODO if there is no chunkserver in system, it will cause a panic.
-	primaryNode := allDataNodes[0]
-	for _, node := range allDataNodes {
-		if node.Leases.Cardinality() < primaryNode.Leases.Cardinality() {
-			primaryNode = node
-		}
-	}
-	dataNodes := make([]*DataNode, len(allDataNodes)-1)
-	index := 0
-	for _, node := range allDataNodes {
-		if node.Id != primaryNode.Id {
-			dataNodes[index] = node
-			index++
-		}
-	}
-	adjust4Allocate()
-	return dataNodes, primaryNode
-}
-
-func RemoveChunk(chunkId string, node *DataNode) {
-	node.Chunks.Remove(chunkId)
-	adjust4Remove(node)
-}
-
-func adjust4Allocate() {
+// 1. Reload dataNodeHeap with all DataNode.
+// 2. Select the first "ReplicaNum" dataNodes with the least number of memory Chunk.
+// Todo if Chunk num is same, choose the DataNode with less IOLoad.
+func AllocateDataNodes() []*DataNode {
 	updateMapLock.RLock()
 	updateHeapLock.Lock()
 	dataNodeHeap.dns = dataNodeHeap.dns[0:0]
 	for _, node := range dataNodeMap {
-		adjust(node)
+		if node.status == common.Alive {
+			adjust(node)
+		}
 	}
+	allDataNodes := make([]*DataNode, dataNodeHeap.Len())
+	copy(allDataNodes, dataNodeHeap.dns)
 	updateHeapLock.Unlock()
 	updateMapLock.RUnlock()
-
-}
-
-func adjust4Remove(node *DataNode) {
-	updateHeapLock.Lock()
-	adjust(node)
-	updateHeapLock.Unlock()
-}
-
-func Adjust4Add(node *DataNode) {
-	updateHeapLock.Lock()
-	adjust(node)
-	updateHeapLock.Unlock()
+	return allDataNodes
 }
 
 // adjust tries to put a DataNode into dataNodeHeap. If this DataNode meets the
@@ -241,17 +281,6 @@ func adjust(node *DataNode) {
 			heap.Push(&dataNodeHeap, topNode)
 		}
 	}
-}
-
-func ReleaseLease(dataNodeId string, chunkId string) error {
-	updateMapLock.RLock()
-	defer updateMapLock.RUnlock()
-	dataNode, ok := dataNodeMap[dataNodeId]
-	if !ok {
-		return fmt.Errorf("fail to get FileNode from dataNodeMap, fileNodeId : %s", dataNodeId)
-	}
-	dataNode.Leases.Remove(chunkId)
-	return nil
 }
 
 // PersistDataNodes writes all DataNode in dataNodeMap to the sink for persistence.
@@ -272,8 +301,7 @@ func PersistDataNodes(sink raft.SnapshotSink) error {
 // RestoreDataNodes reads all DataNode from the buf and puts them into dataNodeMap.
 func RestoreDataNodes(buf *bufio.Scanner) error {
 	var (
-		chunks = mapset.NewSet()
-		leases = mapset.NewSet()
+		chunks = set.NewSet()
 	)
 
 	for buf.Scan() {
@@ -283,24 +311,20 @@ func RestoreDataNodes(buf *bufio.Scanner) error {
 		}
 		data := strings.Split(line, "$")
 
-		chunksLen := len(data[DNChunksIdx])
-		chunksData := data[DNChunksIdx][1 : chunksLen-1]
+		chunksLen := len(data[dnChunksIdx])
+		chunksData := data[dnChunksIdx][1 : chunksLen-1]
 		for _, chunkId := range strings.Split(chunksData, " ") {
 			chunks.Add(chunkId)
 		}
-		leasesLen := len(data[leaseIdx])
-		leasesData := data[leaseIdx][1 : leasesLen-1]
-		for _, chunkId := range strings.Split(leasesData, " ") {
-			leases.Add(chunkId)
-		}
 		heartbeatTime, _ := time.Parse(common.LogFileTimeFormat, data[heartbeatIdx])
 		status, _ := strconv.Atoi(data[statusIdx])
+		ioLoad, _ := strconv.Atoi(data[ioLoadIdx])
 		dataNodeMap[data[dataNodeIdIdx]] = &DataNode{
 			Id:            data[dataNodeIdIdx],
 			status:        status,
 			Address:       data[addressIdx],
 			Chunks:        chunks,
-			Leases:        leases,
+			IOLoad:        ioLoad,
 			HeartbeatTime: heartbeatTime,
 		}
 	}
