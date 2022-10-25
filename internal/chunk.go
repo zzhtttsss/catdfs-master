@@ -82,13 +82,11 @@ func BatchFilterChunk(ids []string) []string {
 	updateChunksLock.RLock()
 	defer updateChunksLock.RUnlock()
 	chunkIds := make([]string, 0, len(ids))
-	index := 0
 	for i := 0; i < len(ids); i++ {
 		// Chunk should still exist and it's DataNode is not full.
 		if chunk, ok := chunksMap[ids[i]]; ok {
 			if chunk.dataNodes.Cardinality()+chunk.pendingDataNodes.Cardinality() < viper.GetInt(common.ReplicaNum) {
-				chunkIds[index] = ids[i]
-				index++
+				chunkIds = append(chunkIds, ids[i])
 			}
 		}
 	}

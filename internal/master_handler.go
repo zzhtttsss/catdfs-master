@@ -360,11 +360,15 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 // maintain the connection between chunkserver and master.
 func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
 	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
+	successInfos := convChunkInfo(args.SuccessChunkInfos)
+	failInfos := convChunkInfo(args.FailChunkInfos)
 	operation := &HeartbeatOperation{
-		Id:         util.GenerateUUIDString(),
-		DataNodeId: args.Id,
-		ChunkIds:   args.ChunkId,
-		IOLoad:     args.IOLoad,
+		Id:           util.GenerateUUIDString(),
+		DataNodeId:   args.Id,
+		ChunkIds:     args.ChunkId,
+		IOLoad:       args.IOLoad,
+		SuccessInfos: successInfos,
+		FailInfos:    failInfos,
 	}
 	data := getData4Apply(operation, common.OperationHeartbeat)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
@@ -385,9 +389,36 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		})
 		return nil, details.Err()
 	}
+	chunkSendInfos := (response.Response).([]ChunkSendInfo)
+	nextChunkInfos := deConvChunkInfo(chunkSendInfos)
+	dataNodeAddress := GetDataNodeAdds(chunkSendInfos)
+	heartbeatReply := &pb.HeartbeatReply{
+		DataNodeAddress: dataNodeAddress,
+		ChunkInfos:      nextChunkInfos,
+	}
+	return heartbeatReply, nil
+}
 
-	rep := &pb.HeartbeatReply{}
-	return rep, nil
+func convChunkInfo(chunkInfos []*pb.ChunkInfo) []ChunkSendInfo {
+	chunkSendInfos := make([]ChunkSendInfo, len(chunkInfos))
+	for i := 0; i < len(chunkInfos); i++ {
+		chunkSendInfos[i] = ChunkSendInfo{
+			ChunkId:          chunkInfos[i].ChunkId,
+			TargetDataNodeId: chunkInfos[i].DataNodeId,
+		}
+	}
+	return chunkSendInfos
+}
+
+func deConvChunkInfo(chunkSendInfos []ChunkSendInfo) []*pb.ChunkInfo {
+	chunkInfos := make([]*pb.ChunkInfo, len(chunkSendInfos))
+	for i := 0; i < len(chunkInfos); i++ {
+		chunkInfos[i] = &pb.ChunkInfo{
+			ChunkId:    chunkSendInfos[i].ChunkId,
+			DataNodeId: chunkSendInfos[i].TargetDataNodeId,
+		}
+	}
+	return chunkInfos
 }
 
 // CheckArgs4Add is called by client. It check whether the path and file name
@@ -499,7 +530,7 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 	return (response.Response).(*pb.GetDataNodes4AddReply), nil
 }
 
-// GetDataNodes4Get is called by client. It finds the dataNodes for the specified chunkId.
+// GetDataNodes4Get is called by client. It finds the dataNodes for the specified ChunkId.
 func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.GetDataNodes4GetArgs) (*pb.GetDataNodes4GetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for getting data node, FileNodeId: %s", args.FileNodeId)
 	operation := &GetOperation{

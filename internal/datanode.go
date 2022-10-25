@@ -56,7 +56,7 @@ type DataNode struct {
 	// IOLoad represents IO load of a DataNode. It is flushed by DataNode's heartbeat,
 	// so it will have a delay of a few seconds.
 	IOLoad           int
-	FutureSendChunks set.Set
+	FutureSendChunks map[ChunkSendInfo]int
 	// HeartbeatTime is the time when the most recent heartbeat was received for
 	// this node.
 	HeartbeatTime time.Time
@@ -166,16 +166,30 @@ func GetDataNode(id string) *DataNode {
 	return dataNodeMap[id]
 }
 
-func GetDataNodeIds() []string {
+func Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	updateMapLock.RLock()
 	defer updateMapLock.RUnlock()
-	ids := make([]string, 0, len(dataNodeMap))
-	for id, node := range dataNodeMap {
-		if node.status == common.Alive {
-			ids = append(ids, id)
+	dataNode, ok := dataNodeMap[o.DataNodeId]
+	if !ok {
+		return nil, false
+	}
+	dataNode.HeartbeatTime = time.Now()
+	dataNode.status = common.Alive
+	dataNode.IOLoad = int(o.IOLoad)
+	for _, info := range o.SuccessInfos {
+		delete(dataNode.FutureSendChunks, info)
+	}
+	for _, info := range o.FailInfos {
+		delete(dataNode.FutureSendChunks, info)
+		pendingChunkQueue.Push(String(info.ChunkId))
+	}
+	nextChunkInfos := make([]ChunkSendInfo, 0, len(dataNode.FutureSendChunks))
+	for info, i := range dataNode.FutureSendChunks {
+		if i == common.WaitToSend {
+			nextChunkInfos = append(nextChunkInfos, info)
 		}
 	}
-	return ids
+	return nextChunkInfos, true
 }
 
 func GetSortedDataNodeIds(set set.Set) ([]string, []string) {
@@ -184,10 +198,8 @@ func GetSortedDataNodeIds(set set.Set) ([]string, []string) {
 	setChan := set.Iter()
 
 	dns := make([]*DataNode, 0, set.Cardinality())
-	index := 0
 	for id := range setChan {
-		dns[index] = dataNodeMap[id.(string)]
-		index++
+		dns = append(dns, dataNodeMap[id.(string)])
 	}
 	sort.SliceStable(dns, func(i, j int) bool {
 		if dns[i].IOLoad < dns[j].IOLoad {
@@ -216,23 +228,32 @@ func GetAliveDataNodeIds() []string {
 	return ids
 }
 
+func GetDataNodeAdds(chunkSendInfos []ChunkSendInfo) []string {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	adds := make([]string, 0, len(dataNodeMap))
+	for _, info := range chunkSendInfos {
+		adds = append(adds, dataNodeMap[info.TargetDataNodeId].Address)
+	}
+	return adds
+}
+
 // BatchAllocateDataNode use the given plan to allocate Chunk for each DataNode.
 func BatchAllocateDataNode(receiverPlan []int, senderPlan []int, chunkIds []string, dataNodeIds []string) {
 	updateMapLock.RLock()
 	defer updateMapLock.RUnlock()
 	for i, dnIndex := range senderPlan {
-		chunkSendInfo := &ChunkSendInfo{
-			chunkId:          chunkIds[i],
-			targetDataNodeId: dataNodeIds[receiverPlan[i]],
+		chunkSendInfo := ChunkSendInfo{
+			ChunkId:          chunkIds[i],
+			TargetDataNodeId: dataNodeIds[receiverPlan[i]],
 		}
-		dataNodeMap[dataNodeIds[dnIndex]].FutureSendChunks.Add(chunkSendInfo)
+		dataNodeMap[dataNodeIds[dnIndex]].FutureSendChunks[chunkSendInfo] = common.WaitToInform
 	}
 }
 
 type ChunkSendInfo struct {
-	chunkId          string
-	targetDataNodeId string
-	state            int
+	ChunkId          string
+	TargetDataNodeId string
 }
 
 func RemoveDataNode(dataNodeId string) {
@@ -245,6 +266,9 @@ func RemoveDataNode(dataNodeId string) {
 	delete(dataNodeMap, dataNodeId)
 	for _, chunkId := range diedNode.Chunks.ToSlice() {
 		pendingChunkQueue.Push(String(chunkId.(string)))
+	}
+	for info := range diedNode.FutureSendChunks {
+		pendingChunkQueue.Push(String(info.ChunkId))
 	}
 }
 
