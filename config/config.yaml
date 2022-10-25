@@ -13,6 +13,7 @@ chunk:
   replicaNum: 3   # number of replica that a chunk will be store
   deadChunkCheckTime: 180  # dead chunk will be copied every 180s
   deadChunkCopyThreshold: 32  # dead chunk will be copied when count is 32 or more
+  directoryCheckTime: 12
 
 # etcd config
 etcd:

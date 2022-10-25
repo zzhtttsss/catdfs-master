@@ -3,6 +3,7 @@ package internal
 import (
 	"bufio"
 	"container/list"
+	"context"
 	"fmt"
 	"github.com/hashicorp/raft"
 	"github.com/sirupsen/logrus"
@@ -32,7 +33,8 @@ const (
 const (
 	rootFileName     = ""
 	pathSplitString  = "/"
-	deleteFilePrefix = "delete"
+	deleteFilePrefix = "delete_"
+	deleteDelimiter  = "_"
 )
 
 var (
@@ -263,6 +265,17 @@ func MoveFileNode(currentPath string, targetPath string) (*FileNode, error) {
 // and update isDel and delTime of the FileNode. The delete state will be
 // canceled when the user renames the FileNode within a certain period of time.
 func RemoveFileNode(path string) (*FileNode, error) {
+	return removeFileNode(path, true)
+}
+
+// EraseFileNode will completely delete a FileNode. It is only used internally.
+// It will set the delTime of a FileNode to one year ago, so the monitor goroutine
+// will completely delete the FileNode
+func EraseFileNode(path string) (*FileNode, error) {
+	return removeFileNode(path, false)
+}
+
+func removeFileNode(path string, isDummy bool) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
@@ -270,11 +283,14 @@ func RemoveFileNode(path string) (*FileNode, error) {
 	defer unlockAllMutex(stack, false)
 
 	delete(fileNode.ParentNode.ChildNodes, fileNode.FileName)
-	fileNode.FileName = deleteFilePrefix + fileNode.FileName
+	fileNode.FileName = deleteFilePrefix + fileNode.Id + deleteDelimiter + fileNode.FileName
 	fileNode.ParentNode.ChildNodes[fileNode.FileName] = fileNode
 
 	fileNode.IsDel = true
 	delTime := time.Now()
+	if !isDummy {
+		delTime = delTime.AddDate(-1, 0, 0)
+	}
 	fileNode.DelTime = &(delTime)
 	return fileNode, nil
 }
@@ -317,6 +333,39 @@ func RenameFileNode(path string, newName string) (*FileNode, error) {
 
 func StatFileNode(path string) (*FileNode, error) {
 	return CheckAndGetFileNode(path)
+}
+
+func MonitorDirectory(ctx context.Context) {
+	//for {
+	//	select {
+	//	default:
+	//		updateMapLock.Lock()
+	//		for _, node := range dataNodeMap {
+	//			if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkWaitingTime)*
+	//				viper.GetInt(common.ChunkHeartbeatTime) || node.status == common.Alive {
+	//				node.status = common.Waiting
+	//				continue
+	//			}
+	//			if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) ||
+	//				node.status == common.Waiting {
+	//				node.status = common.Died
+	//				csCountMonitor.Dec()
+	//				operation := &DeregisterOperation{
+	//					Id:         util.GenerateUUIDString(),
+	//					DataNodeId: node.Id,
+	//				}
+	//				data := getData4Apply(operation, common.OperationDeregister)
+	//				_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+	//				continue
+	//			}
+	//		}
+	//		updateMapLock.Unlock()
+	//		logrus.WithContext(ctx).Infof("Complete a round of check, time: %s", time.Now().String())
+	//		time.Sleep(time.Duration(viper.GetInt(common.MasterCheckTime)) * time.Second)
+	//	case <-ctx.Done():
+	//		return
+	//	}
+	//}
 }
 
 func (f *FileNode) String() string {

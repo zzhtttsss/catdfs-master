@@ -10,6 +10,7 @@ import (
 	"time"
 	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
+	"tinydfs-base/util"
 )
 
 var (
@@ -29,7 +30,7 @@ func init() {
 	OpTypeMap[common.OperationList] = reflect.TypeOf(ListOperation{})
 	OpTypeMap[common.OperationStat] = reflect.TypeOf(StatOperation{})
 	OpTypeMap[common.OperationRename] = reflect.TypeOf(RenameOperation{})
-	OpTypeMap[common.OperationShrink] = reflect.TypeOf(ShrinkOperation{})
+	OpTypeMap[common.OperationAllocateChunks] = reflect.TypeOf(AllocateChunksOperation{})
 	OpTypeMap[common.OperationExpand] = reflect.TypeOf(ExpandOperation{})
 	OpTypeMap[common.OperationDeregister] = reflect.TypeOf(DeregisterOperation{})
 }
@@ -82,22 +83,25 @@ type HeartbeatOperation struct {
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
 	logrus.Infof("heartbeat, id: %s", o.DataNodeId)
-	nextChunkInfos, ok := Heartbeat(o)
+	nextChunkInfos, ok := HeartbeatDataNode(o)
 	if !ok {
 		return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
 	}
+	HeartbeatChunk(o)
 	return nextChunkInfos, nil
 }
 
 type AddOperation struct {
-	Id         string `json:"id"`
-	Path       string `json:"path"`
-	FileName   string `json:"file_name"`
-	Size       int64  `json:"size"`
-	FileNodeId string `json:"file_node_id"`
-	ChunkIndex int32  `json:"chunk_index"`
-	ChunkId    string `json:"chunk_id"`
-	Stage      int    `json:"stage"`
+	Id           string                 `json:"id"`
+	Path         string                 `json:"path"`
+	FileName     string                 `json:"file_name"`
+	Size         int64                  `json:"size"`
+	FileNodeId   string                 `json:"file_node_id"`
+	ChunkIndex   int32                  `json:"chunk_index"`
+	ChunkId      string                 `json:"chunk_id"`
+	Infos        []util.ChunkSendResult `json:"infos"`
+	FailChunkIds []string               `json:"fail_chunk_ids"`
+	Stage        int                    `json:"stage"`
 }
 
 func (o AddOperation) Apply() (interface{}, error) {
@@ -123,7 +127,7 @@ func (o AddOperation) Apply() (interface{}, error) {
 			dataNodeAddrs = make([]string, len(dataNodes))
 		)
 		for i, node := range dataNodes {
-			node.Chunks.Add(chunkId)
+			//node.Chunks.Add(chunkId)
 			dataNodeIds.Add(node.Id)
 			dataNodeAddrs[i] = node.Address
 		}
@@ -133,11 +137,22 @@ func (o AddOperation) Apply() (interface{}, error) {
 			pendingDataNodes: dataNodeIds,
 		}
 		AddChunk(chunk)
+		dnIdSlice := make([]string, dataNodeIds.Cardinality())
+		for _, id := range dataNodeIds.ToSlice() {
+			dnIdSlice = append(dnIdSlice, id.(string))
+		}
 		rep := &pb.GetDataNodes4AddReply{
-			DataNodes: dataNodeAddrs,
+			DataNodes:   dataNodeAddrs,
+			DataNodeIds: dnIdSlice,
 		}
 		return rep, nil
 	case common.UnlockDic:
+		if len(o.FailChunkIds) != 0 {
+			_, _ = EraseFileNode(o.Path)
+		}
+		BatchClearPendingDataNodes(o.FailChunkIds)
+		BatchUpdatePendingDataNodes(o.Infos)
+		BatchAddChunks(o.Infos)
 		err := UnlockFileNodesById(o.FileNodeId, false)
 		return nil, err
 	default:
@@ -260,16 +275,13 @@ func (d DeregisterOperation) Apply() (interface{}, error) {
 	return nil, nil
 }
 
-type ShrinkOperation struct {
-	Id            string `json:"id"`
-	ShrinkChunkId string `json:"shrinkChunkId"`
-	FromDataNode  string `json:"fromDataNode"`
-	ToDataNodes   string `json:"toDataNode"`
+type AllocateChunksOperation struct {
+	Id string `json:"id"`
 }
 
-func (o ShrinkOperation) Apply() (interface{}, error) {
-	//TODO implement me
-	panic("implement me")
+func (o AllocateChunksOperation) Apply() (interface{}, error) {
+	DoBatchAllocateChunks()
+	return nil, nil
 }
 
 type ExpandOperation struct {

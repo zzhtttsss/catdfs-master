@@ -6,6 +6,7 @@ import (
 	"fmt"
 	set "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"go.uber.org/atomic"
 	"math"
@@ -76,6 +77,29 @@ func GetChunk(id string) *Chunk {
 	updateChunksLock.RLock()
 	defer updateChunksLock.RUnlock()
 	return chunksMap[id]
+}
+
+func BatchClearPendingDataNodes(chunkIds []string) {
+	updateChunksLock.Lock()
+	defer updateChunksLock.Unlock()
+	for _, id := range chunkIds {
+		if chunk, ok := chunksMap[id]; ok {
+			chunk.pendingDataNodes.Clear()
+		}
+	}
+}
+
+func BatchUpdatePendingDataNodes(infos []util.ChunkSendResult) {
+	updateChunksLock.Lock()
+	defer updateChunksLock.Unlock()
+	for _, info := range infos {
+		if chunk, ok := chunksMap[info.ChunkId]; ok {
+			for _, id := range info.SuccessDataNodes {
+				chunk.dataNodes.Add(id)
+			}
+			chunk.pendingDataNodes.Clear()
+		}
+	}
 }
 
 func BatchFilterChunk(ids []string) []string {
@@ -191,41 +215,41 @@ func RestoreDeadChunkQueue(buf *bufio.Scanner) error {
 	return nil
 }
 
-// MonitorPendingChunk Run in a goroutine.
-// This function will monitor dead chunk queue.
+// MonitorPendingChunk runs in a goroutine.
+// This function will monitor pendingChunkQueue.
 // Start copy chunks when timer elapse or the number of dead chunks equals to #{ChunkDeadChunkCopyThreshold}
 func MonitorPendingChunk(ctx context.Context) {
 	if pendingChunkQueue.Len() > 0 {
-		go batchAllocateChunks()
+		BatchAllocateChunks()
 	}
 	timer := time.NewTicker(time.Duration(viper.GetInt(common.ChunkDeadChunkCheckTime)) * time.Second)
 	for {
-		wg := sync.WaitGroup{}
 		select {
 		case <-timer.C:
-			wg.Add(1)
-			go func() {
-				batchAllocateChunks()
-				wg.Done()
-			}()
-			wg.Wait()
+			BatchAllocateChunks()
 		case <-ctx.Done():
 			timer.Stop()
 			return
 		default:
 			if pendingChunkQueue.Len() >= viper.GetInt(common.ChunkDeadChunkCopyThreshold) {
-				wg.Add(1)
-				go func() {
-					batchAllocateChunks()
-					wg.Done()
-				}()
-				wg.Wait()
+				BatchAllocateChunks()
 			}
 		}
 	}
 }
 
-// batchAllocateChunks runs in a goroutine. It will get a batch of Chunk from
+func BatchAllocateChunks() {
+	operation := &AllocateChunksOperation{
+		Id: util.GenerateUUIDString(),
+	}
+	data := getData4Apply(operation, common.OperationAllocateChunks)
+	applyFuture := GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
+		logrus.Errorf("Fail to allocate a batch of chunks, error detail: %s,", err.Error())
+	}
+}
+
+// DoBatchAllocateChunks runs in a goroutine. It will get a batch of Chunk from
 // pendingChunkQueue and allocate a target DataNode to store for each Chunk.
 // 1. Get batch of Chunk from pendingChunkQueue.
 // 2. Filter legal Chunk and alive DataNode.
@@ -234,12 +258,13 @@ func MonitorPendingChunk(ctx context.Context) {
 //    of every Chunk to make the number of Chunk received and send by each DataNode
 //    as balanced as possible(use variance to measure).
 // 5. Apply the best plan to all target Chunk and target DataNode.
+// 6. Remove the batch of Chunk from pendingChunkQueue.
 // (写给自己) 如果在这个过程进行当中，leader宕机，那么：
 // 问题1. 元数据的更新并不会commit到各个follower和新leader上。所以新leader并不知道这些deadChunk哪些存了，哪些没存。
 // 解决办法：新leader检查deadChunk的queue数量，如果里面有，直接进行保存。(后果可能会造成某些chunk多存储一份)
 // 问题2. 由于先进行复制，后写log，所以会造成log没有写完，但chunk已经复制完毕的情况。因此，活着的dataNode的chunkMap
 // 是和机器上实际情况不匹配的。但新leader的copy过程执行完毕且apply之后，会解决这个问题。
-func batchAllocateChunks() {
+func DoBatchAllocateChunks() {
 	batchChunkIds := getPendingChunks()
 	chunkIds := BatchFilterChunk(batchChunkIds)
 	dataNodeIds := GetAliveDataNodeIds()
@@ -254,6 +279,7 @@ func batchAllocateChunks() {
 	senderPlan := allocateChunksDFS(len(chunkIds), len(dataNodeIds), isStore)
 	BatchAllocateChunk(receiverPlan, chunkIds, dataNodeIds)
 	BatchAllocateDataNode(receiverPlan, senderPlan, chunkIds, dataNodeIds)
+	pendingChunkQueue.BatchPop(len(batchChunkIds))
 }
 
 func getPendingChunks() []string {
@@ -360,4 +386,21 @@ func dfs(chunkNum int, dataNodeNum int, chunkIndex int, dnIndex int, currentResu
 	}
 	(*currentResult)[dnIndex] = (*currentResult)[dnIndex][:len((*currentResult)[dnIndex])-1]
 	return false
+}
+
+// HeartbeatChunk delete the corresponding DataNode in the pendingDataNodes of
+// each Chunk according to the Chunk sending information given by the heartbeat.
+func HeartbeatChunk(o HeartbeatOperation) {
+	updateChunksLock.RLock()
+	defer updateChunksLock.RUnlock()
+	for _, info := range o.SuccessInfos {
+		if chunk, ok := chunksMap[info.ChunkId]; ok {
+			chunk.pendingDataNodes.Remove(info.TargetDataNodeId)
+		}
+	}
+	for _, info := range o.FailInfos {
+		if chunk, ok := chunksMap[info.ChunkId]; ok {
+			chunk.pendingDataNodes.Remove(info.TargetDataNodeId)
+		}
+	}
 }

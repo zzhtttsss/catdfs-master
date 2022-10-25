@@ -166,7 +166,7 @@ func GetDataNode(id string) *DataNode {
 	return dataNodeMap[id]
 }
 
-func Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
+func HeartbeatDataNode(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	updateMapLock.RLock()
 	defer updateMapLock.RUnlock()
 	dataNode, ok := dataNodeMap[o.DataNodeId]
@@ -187,6 +187,12 @@ func Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	for info, i := range dataNode.FutureSendChunks {
 		if i == common.WaitToSend {
 			nextChunkInfos = append(nextChunkInfos, info)
+		}
+	}
+	// Todo 脑子不清醒，需要检查
+	for _, id := range o.ChunkIds {
+		if !dataNode.Chunks.Contains(id) {
+			dataNode.Chunks.Add(id)
 		}
 	}
 	return nextChunkInfos, true
@@ -251,6 +257,18 @@ func BatchAllocateDataNode(receiverPlan []int, senderPlan []int, chunkIds []stri
 	}
 }
 
+func BatchAddChunks(infos []util.ChunkSendResult) {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	for _, info := range infos {
+		for _, id := range info.SuccessDataNodes {
+			if dataNode, ok := dataNodeMap[id]; ok {
+				dataNode.Chunks.Add(info.ChunkId)
+			}
+		}
+	}
+}
+
 type ChunkSendInfo struct {
 	ChunkId          string
 	TargetDataNodeId string
@@ -275,7 +293,6 @@ func RemoveDataNode(dataNodeId string) {
 // AllocateDataNodes Select several DataNode to store a Chunk. DataNode allocation strategy is:
 // 1. Reload dataNodeHeap with all DataNode.
 // 2. Select the first "ReplicaNum" dataNodes with the least number of memory Chunk.
-// Todo if Chunk num is same, choose the DataNode with less IOLoad.
 func AllocateDataNodes() []*DataNode {
 	updateMapLock.RLock()
 	updateHeapLock.Lock()
@@ -285,6 +302,7 @@ func AllocateDataNodes() []*DataNode {
 			adjust(node)
 		}
 	}
+	// Todo if Chunk num is same, choose the DataNode with less IOLoad.
 	allDataNodes := make([]*DataNode, dataNodeHeap.Len())
 	copy(allDataNodes, dataNodeHeap.dns)
 	updateHeapLock.Unlock()

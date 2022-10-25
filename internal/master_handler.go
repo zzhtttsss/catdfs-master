@@ -567,10 +567,21 @@ func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.Get
 func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.UnlockDic4AddArgs) (*pb.UnlockDic4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for unlocking FileNodes in the target path from client, FileNodeId: %s", args.FileNodeId)
 	operation := &AddOperation{
-		Id:         util.GenerateUUIDString(),
-		FileNodeId: args.FileNodeId,
-		Stage:      common.UnlockDic,
+		Id:           util.GenerateUUIDString(),
+		FileNodeId:   args.FileNodeId,
+		FailChunkIds: args.FailChunkIds,
+		Path:         args.FilePath,
+		Stage:        common.UnlockDic,
 	}
+	infos := make([]util.ChunkSendResult, len(args.Infos))
+	for i, info := range args.Infos {
+		infos[i] = util.ChunkSendResult{
+			ChunkId:          info.ChunkId,
+			SuccessDataNodes: info.SuccessNode,
+			FailDataNodes:    info.FailNode,
+		}
+	}
+	operation.Infos = infos
 	data := getData4Apply(operation, common.OperationAdd)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
 	if err := applyFuture.Error(); err != nil {
