@@ -395,12 +395,12 @@ func HeartbeatChunk(o HeartbeatOperation) {
 	defer updateChunksLock.RUnlock()
 	for _, info := range o.SuccessInfos {
 		if chunk, ok := chunksMap[info.ChunkId]; ok {
-			chunk.pendingDataNodes.Remove(info.TargetDataNodeId)
+			chunk.pendingDataNodes.Remove(info.DataNodeId)
 		}
 	}
 	for _, info := range o.FailInfos {
 		if chunk, ok := chunksMap[info.ChunkId]; ok {
-			chunk.pendingDataNodes.Remove(info.TargetDataNodeId)
+			chunk.pendingDataNodes.Remove(info.DataNodeId)
 		}
 	}
 }

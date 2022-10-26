@@ -403,8 +403,8 @@ func convChunkInfo(chunkInfos []*pb.ChunkInfo) []ChunkSendInfo {
 	chunkSendInfos := make([]ChunkSendInfo, len(chunkInfos))
 	for i := 0; i < len(chunkInfos); i++ {
 		chunkSendInfos[i] = ChunkSendInfo{
-			ChunkId:          chunkInfos[i].ChunkId,
-			TargetDataNodeId: chunkInfos[i].DataNodeId,
+			ChunkId:    chunkInfos[i].ChunkId,
+			DataNodeId: chunkInfos[i].DataNodeId,
 		}
 	}
 	return chunkSendInfos
@@ -415,7 +415,7 @@ func deConvChunkInfo(chunkSendInfos []ChunkSendInfo) []*pb.ChunkInfo {
 	for i := 0; i < len(chunkInfos); i++ {
 		chunkInfos[i] = &pb.ChunkInfo{
 			ChunkId:    chunkSendInfos[i].ChunkId,
-			DataNodeId: chunkSendInfos[i].TargetDataNodeId,
+			DataNodeId: chunkSendInfos[i].DataNodeId,
 		}
 	}
 	return chunkInfos

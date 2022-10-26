@@ -350,11 +350,11 @@ func MonitorDirectory(ctx context.Context) {
 	//				node.status == common.Waiting {
 	//				node.status = common.Died
 	//				csCountMonitor.Dec()
-	//				operation := &DeregisterOperation{
+	//				operation := &DegradeOperation{
 	//					Id:         util.GenerateUUIDString(),
 	//					DataNodeId: node.Id,
 	//				}
-	//				data := getData4Apply(operation, common.OperationDeregister)
+	//				data := getData4Apply(operation, common.OperationDegrade)
 	//				_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
 	//				continue
 	//			}

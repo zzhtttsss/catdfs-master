@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	// OpTypeMap is used to include all types of Operation. When implementing a new type of Operation, we should put
-	// <name of operation, type of operation> into this map.
+	// OpTypeMap is used to include all types of Operation. When implementing
+	// a new type of Operation, we should put <name of operation, type of
+	// operation> into this map.
 	OpTypeMap = make(map[string]reflect.Type)
 )
 
@@ -32,7 +33,7 @@ func init() {
 	OpTypeMap[common.OperationRename] = reflect.TypeOf(RenameOperation{})
 	OpTypeMap[common.OperationAllocateChunks] = reflect.TypeOf(AllocateChunksOperation{})
 	OpTypeMap[common.OperationExpand] = reflect.TypeOf(ExpandOperation{})
-	OpTypeMap[common.OperationDeregister] = reflect.TypeOf(DeregisterOperation{})
+	OpTypeMap[common.OperationDegrade] = reflect.TypeOf(DegradeOperation{})
 }
 
 // Operation represents requests to make changes to metadata. If we want to modify the metadata,
@@ -43,8 +44,8 @@ type Operation interface {
 	Apply() (interface{}, error)
 }
 
-// OpContainer is used to encapsulate Operation so that it can be turned into specific type of Operation
-// when be deserialized from bytes.
+// OpContainer is used to encapsulate Operation so that it can be turned into
+// specific type of Operation when be deserialized from bytes.
 type OpContainer struct {
 	OpType string          `json:"op_type"`
 	OpData json.RawMessage `json:"op_data"`
@@ -265,13 +266,14 @@ func fileNode2FileInfo(nodes []*FileNode) []*pb.FileInfo {
 	return files
 }
 
-type DeregisterOperation struct {
+type DegradeOperation struct {
 	Id         string `json:"id"`
 	DataNodeId string `json:"dataNodeId"`
+	Stage      int    `json:"stage"`
 }
 
-func (d DeregisterOperation) Apply() (interface{}, error) {
-	RemoveDataNode(d.DataNodeId)
+func (o DegradeOperation) Apply() (interface{}, error) {
+	DegradeDataNode(o.DataNodeId, o.Stage)
 	return nil, nil
 }
 

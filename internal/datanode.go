@@ -89,18 +89,24 @@ func MonitorHeartbeat(ctx context.Context) {
 				// give died datanode a second chance to restart.
 				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkWaitingTime)*
 					viper.GetInt(common.ChunkHeartbeatTime) || node.status == common.Alive {
-					node.status = common.Waiting
+					operation := &DegradeOperation{
+						Id:         util.GenerateUUIDString(),
+						DataNodeId: node.Id,
+						Stage:      common.Degrade2Waiting,
+					}
+					data := getData4Apply(operation, common.OperationDegrade)
+					_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
 					continue
 				}
 				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) ||
 					node.status == common.Waiting {
 					node.status = common.Died
 					csCountMonitor.Dec()
-					operation := &DeregisterOperation{
+					operation := &DegradeOperation{
 						Id:         util.GenerateUUIDString(),
 						DataNodeId: node.Id,
 					}
-					data := getData4Apply(operation, common.OperationDeregister)
+					data := getData4Apply(operation, common.OperationDegrade)
 					_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
 					continue
 				}
@@ -166,6 +172,7 @@ func GetDataNode(id string) *DataNode {
 	return dataNodeMap[id]
 }
 
+// HeartbeatDataNode is
 func HeartbeatDataNode(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	updateMapLock.RLock()
 	defer updateMapLock.RUnlock()
@@ -239,7 +246,7 @@ func GetDataNodeAdds(chunkSendInfos []ChunkSendInfo) []string {
 	defer updateMapLock.RUnlock()
 	adds := make([]string, 0, len(dataNodeMap))
 	for _, info := range chunkSendInfos {
-		adds = append(adds, dataNodeMap[info.TargetDataNodeId].Address)
+		adds = append(adds, dataNodeMap[info.DataNodeId].Address)
 	}
 	return adds
 }
@@ -250,8 +257,8 @@ func BatchAllocateDataNode(receiverPlan []int, senderPlan []int, chunkIds []stri
 	defer updateMapLock.RUnlock()
 	for i, dnIndex := range senderPlan {
 		chunkSendInfo := ChunkSendInfo{
-			ChunkId:          chunkIds[i],
-			TargetDataNodeId: dataNodeIds[receiverPlan[i]],
+			ChunkId:    chunkIds[i],
+			DataNodeId: dataNodeIds[receiverPlan[i]],
 		}
 		dataNodeMap[dataNodeIds[dnIndex]].FutureSendChunks[chunkSendInfo] = common.WaitToInform
 	}
@@ -270,22 +277,26 @@ func BatchAddChunks(infos []util.ChunkSendResult) {
 }
 
 type ChunkSendInfo struct {
-	ChunkId          string
-	TargetDataNodeId string
+	ChunkId    string
+	DataNodeId string
 }
 
-func RemoveDataNode(dataNodeId string) {
+func DegradeDataNode(dataNodeId string, stage int) {
 	updateMapLock.Lock()
 	defer updateMapLock.Unlock()
-	diedNode, ok := dataNodeMap[dataNodeId]
+	dataNode, ok := dataNodeMap[dataNodeId]
 	if !ok {
 		return
 	}
+	if stage == common.Degrade2Waiting {
+		dataNode.status = common.Waiting
+		return
+	}
 	delete(dataNodeMap, dataNodeId)
-	for _, chunkId := range diedNode.Chunks.ToSlice() {
+	for _, chunkId := range dataNode.Chunks.ToSlice() {
 		pendingChunkQueue.Push(String(chunkId.(string)))
 	}
-	for info := range diedNode.FutureSendChunks {
+	for info := range dataNode.FutureSendChunks {
 		pendingChunkQueue.Push(String(info.ChunkId))
 	}
 }
