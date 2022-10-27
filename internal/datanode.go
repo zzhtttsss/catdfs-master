@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"container/heap"
 	"context"
+	"encoding/json"
 	"fmt"
 	set "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
@@ -96,7 +97,7 @@ func MonitorHeartbeat(ctx context.Context) {
 			for _, node := range dataNodeMap {
 				// give died datanode a second chance to restart.
 				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkWaitingTime)*
-					viper.GetInt(common.ChunkHeartbeatTime) || node.status == common.Alive {
+					viper.GetInt(common.ChunkHeartbeatTime) && node.status == common.Alive {
 					operation := &DegradeOperation{
 						Id:         util.GenerateUUIDString(),
 						DataNodeId: node.Id,
@@ -106,7 +107,7 @@ func MonitorHeartbeat(ctx context.Context) {
 					_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
 					continue
 				}
-				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) ||
+				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) &&
 					node.status == common.Waiting {
 					csCountMonitor.Dec()
 					operation := &DegradeOperation{
@@ -182,8 +183,8 @@ func GetDataNode(id string) *DataNode {
 
 // HeartbeatDataNode is
 func HeartbeatDataNode(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
-	updateMapLock.RLock()
-	defer updateMapLock.RUnlock()
+	updateMapLock.Lock()
+	defer updateMapLock.Unlock()
 	dataNode, ok := dataNodeMap[o.DataNodeId]
 	if !ok {
 		return nil, false
@@ -209,6 +210,10 @@ func HeartbeatDataNode(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 		if !dataNode.Chunks.Contains(id) {
 			dataNode.Chunks.Add(id)
 		}
+	}
+	if len(nextChunkInfos) != 0 {
+		bytes, _ := json.Marshal(nextChunkInfos)
+		logrus.Infof("nextChunkInfos is %s", string(bytes))
 	}
 	return nextChunkInfos, true
 }
@@ -261,8 +266,8 @@ func GetDataNodeAddresses(chunkSendInfos []ChunkSendInfo) []string {
 
 // BatchAllocateDataNode use the given plan to allocate Chunk for each DataNode.
 func BatchAllocateDataNode(receiverPlan []int, senderPlan []int, chunkIds []string, dataNodeIds []string) {
-	updateMapLock.RLock()
-	defer updateMapLock.RUnlock()
+	updateMapLock.Lock()
+	defer updateMapLock.Unlock()
 	for i, dnIndex := range senderPlan {
 		chunkSendInfo := ChunkSendInfo{
 			ChunkId:    chunkIds[i],
@@ -273,8 +278,8 @@ func BatchAllocateDataNode(receiverPlan []int, senderPlan []int, chunkIds []stri
 }
 
 func BatchAddChunks(infos []util.ChunkSendResult) {
-	updateMapLock.RLock()
-	defer updateMapLock.RUnlock()
+	updateMapLock.Lock()
+	defer updateMapLock.Unlock()
 	for _, info := range infos {
 		for _, id := range info.SuccessDataNodes {
 			if dataNode, ok := dataNodeMap[id]; ok {
@@ -290,6 +295,7 @@ type ChunkSendInfo struct {
 }
 
 func DegradeDataNode(dataNodeId string, stage int) {
+	logrus.Infof("start to degrade, datanode id: %s, stage: %v", dataNodeId, stage)
 	updateMapLock.Lock()
 	defer updateMapLock.Unlock()
 	dataNode, ok := dataNodeMap[dataNodeId]

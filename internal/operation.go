@@ -293,6 +293,8 @@ type AllocateChunksOperation struct {
 }
 
 func (o AllocateChunksOperation) Apply() (interface{}, error) {
+	bytes, _ := json.Marshal(o)
+	logrus.Infof("AllocateChunks operation detail: %s", string(bytes))
 	ApplyAllocatePlan(o.SenderPlan, o.ReceiverPlan, o.ChunkIds, o.DataNodeIds, o.BatchLen)
 	return nil, nil
 }

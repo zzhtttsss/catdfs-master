@@ -128,8 +128,8 @@ func BatchFilterChunk(ids []string) []string {
 
 // BatchAllocateChunk use the given plan to allocate DataNode for each Chunk.
 func BatchAllocateChunk(plan []int, chunkIds []string, dataNodeIds []string) {
-	updateChunksLock.RLock()
-	defer updateChunksLock.RUnlock()
+	updateChunksLock.Lock()
+	defer updateChunksLock.Unlock()
 	for i, dnIndex := range plan {
 		chunksMap[chunkIds[i]].pendingDataNodes.Add(dataNodeIds[dnIndex])
 	}
@@ -260,10 +260,14 @@ func MonitorPendingChunk(ctx context.Context) {
 //    of every Chunk to make the number of Chunk received and send by each DataNode
 //    as balanced as possible(use variance to measure).
 func BatchAllocateChunks() {
+	if pendingChunkQueue.Len() == 0 {
+		return
+	}
 	batchChunkIds := getPendingChunks()
 	chunkIds := BatchFilterChunk(batchChunkIds)
 	dataNodeIds := GetAliveDataNodeIds()
 	isStore := getStoreState(batchChunkIds, dataNodeIds)
+	logrus.Infof("isStore is: %v", isStore)
 	// Todo DataNode num is less than replicate num or other similar situation so that a Chunk can not find a DataNode to store.
 	receiverPlan := allocateChunksDFS(len(chunkIds), len(dataNodeIds), isStore)
 	for i := 0; i < len(isStore); i++ {
@@ -414,8 +418,8 @@ func dfs(chunkNum int, dataNodeNum int, chunkIndex int, dnIndex int, currentResu
 // HeartbeatChunk delete the corresponding DataNode in the pendingDataNodes of
 // each Chunk according to the Chunk sending information given by the heartbeat.
 func HeartbeatChunk(o HeartbeatOperation) {
-	updateChunksLock.RLock()
-	defer updateChunksLock.RUnlock()
+	updateChunksLock.Lock()
+	defer updateChunksLock.Unlock()
 	for _, info := range o.SuccessInfos {
 		if chunk, ok := chunksMap[info.ChunkId]; ok {
 			chunk.pendingDataNodes.Remove(info.DataNodeId)
