@@ -95,6 +95,7 @@ func MonitorHeartbeat(ctx context.Context) {
 		default:
 			updateMapLock.Lock()
 			for _, node := range dataNodeMap {
+				logrus.Infof("datanode id: %s, chunk set: %s", node.Id, node.Chunks.String())
 				// give died datanode a second chance to restart.
 				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkWaitingTime)*
 					viper.GetInt(common.ChunkHeartbeatTime) && node.status == common.Alive {
@@ -201,8 +202,9 @@ func HeartbeatDataNode(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	}
 	nextChunkInfos := make([]ChunkSendInfo, 0, len(dataNode.FutureSendChunks))
 	for info, i := range dataNode.FutureSendChunks {
-		if i == common.WaitToSend {
+		if i != common.WaitToSend {
 			nextChunkInfos = append(nextChunkInfos, info)
+			dataNode.FutureSendChunks[info] = common.WaitToSend
 		}
 	}
 	// Todo 脑子不清醒，需要检查
@@ -215,6 +217,11 @@ func HeartbeatDataNode(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 		bytes, _ := json.Marshal(nextChunkInfos)
 		logrus.Infof("nextChunkInfos is %s", string(bytes))
 	}
+	bytes, err := json.Marshal(nextChunkInfos)
+	if err != nil {
+		logrus.Errorf("Fail to marshal nextChunkInfos, error detail: %s", err.Error())
+	}
+	logrus.Infof("nextChunkInfos detail: %s", string(bytes))
 	return nextChunkInfos, true
 }
 
@@ -307,12 +314,15 @@ func DegradeDataNode(dataNodeId string, stage int) {
 		return
 	}
 	delete(dataNodeMap, dataNodeId)
+	logrus.Infof("degrade datanode chunks is: %s, len is: %v", dataNode.Chunks.String(), dataNode.Chunks.Cardinality())
 	for _, chunkId := range dataNode.Chunks.ToSlice() {
 		pendingChunkQueue.Push(String(chunkId.(string)))
 	}
+	BatchClearDataNode(dataNode.Chunks.ToSlice(), dataNodeId)
 	for info := range dataNode.FutureSendChunks {
 		pendingChunkQueue.Push(String(info.ChunkId))
 	}
+	logrus.Infof("current pendingChunkQueue len is: %v", pendingChunkQueue.Len())
 }
 
 // AllocateDataNodes Select several DataNode to store a Chunk. DataNode allocation strategy is:
