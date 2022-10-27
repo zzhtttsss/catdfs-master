@@ -55,7 +55,9 @@ type DataNode struct {
 	Leases set.Set
 	// IOLoad represents IO load of a DataNode. It is flushed by DataNode's heartbeat,
 	// so it will have a delay of a few seconds.
-	IOLoad           int
+	IOLoad int
+	// FutureSendChunks include ChunkSendInfo that means this DataNode should send
+	// which Chunk to Which DataNode, and the value represent the state of sending.
 	FutureSendChunks map[ChunkSendInfo]int
 	// HeartbeatTime is the time when the most recent heartbeat was received for
 	// this node.
@@ -77,9 +79,15 @@ func (d *DataNode) String() string {
 	return res.String()
 }
 
-// MonitorHeartbeat runs in a goroutine. This function will monitor heartbeat of
-// all DataNode. It will scan dataNodeMap every once in a while and change the
-// status of DataNode which with no heartbeat for ten minutes.
+// MonitorHeartbeat runs in a goroutine. This function monitor heartbeat of
+// all DataNode. It will check all DataNode in dataNodeMap every 1 minute,
+// there are 3 situations:
+// 1. We have received heartbeat of this DataNode in 30 seconds. if the status
+//    of it is waiting, we will set status to alive, or we will do nothing.
+// 2. The status of DataNode is alive and we have not receive heartbeat of it
+//    over 30 seconds, we will set status to waiting.
+// 3. The status of DataNode is waiting and we have not receive heartbeat of it
+//    over 10 minute, we will think this DataNode is dead and start a shrink.
 func MonitorHeartbeat(ctx context.Context) {
 	for {
 		select {
@@ -100,11 +108,11 @@ func MonitorHeartbeat(ctx context.Context) {
 				}
 				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) ||
 					node.status == common.Waiting {
-					node.status = common.Died
 					csCountMonitor.Dec()
 					operation := &DegradeOperation{
 						Id:         util.GenerateUUIDString(),
 						DataNodeId: node.Id,
+						Stage:      common.Degrade2Dead,
 					}
 					data := getData4Apply(operation, common.OperationDegrade)
 					_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
@@ -241,7 +249,7 @@ func GetAliveDataNodeIds() []string {
 	return ids
 }
 
-func GetDataNodeAdds(chunkSendInfos []ChunkSendInfo) []string {
+func GetDataNodeAddresses(chunkSendInfos []ChunkSendInfo) []string {
 	updateMapLock.RLock()
 	defer updateMapLock.RUnlock()
 	adds := make([]string, 0, len(dataNodeMap))
@@ -277,8 +285,8 @@ func BatchAddChunks(infos []util.ChunkSendResult) {
 }
 
 type ChunkSendInfo struct {
-	ChunkId    string
-	DataNodeId string
+	ChunkId    string `json:"chunk_id"`
+	DataNodeId string `json:"data_node_id"`
 }
 
 func DegradeDataNode(dataNodeId string, stage int) {

@@ -391,7 +391,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 	}
 	chunkSendInfos := (response.Response).([]ChunkSendInfo)
 	nextChunkInfos := deConvChunkInfo(chunkSendInfos)
-	dataNodeAddress := GetDataNodeAdds(chunkSendInfos)
+	dataNodeAddress := GetDataNodeAddresses(chunkSendInfos)
 	heartbeatReply := &pb.HeartbeatReply{
 		DataNodeAddress: dataNodeAddress,
 		ChunkInfos:      nextChunkInfos,

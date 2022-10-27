@@ -27,8 +27,8 @@ var (
 	// chunksMap stores all Chunk in the file system, using id as the key.
 	chunksMap        = make(map[string]*Chunk)
 	updateChunksLock = &sync.RWMutex{}
-	// pendingChunkQueue stores all Chunk that are waiting to be allocated and
-	// stored to a DataNode.
+	// pendingChunkQueue stores all Chunk that are missing a replica and waiting
+	// to be allocated to a DataNode.
 	pendingChunkQueue = util.NewQueue[String]()
 )
 
@@ -36,7 +36,10 @@ type Chunk struct {
 	// Id is FileNodeId+_+ChunkNum
 	Id string
 	// dataNodes includes all id of DataNode which are storing this Chunk.
-	dataNodes        set.Set
+	dataNodes set.Set
+	// pendingDataNodes includes all id of DataNode which will store this Chunk.
+	// It means these DataNode is already allocated to store this Chunk, but they
+	// have not truly store this Chunk in their hard drive.
 	pendingDataNodes set.Set
 	// Deprecated: primaryNode is the id of DataNode which has the lease of this Chunk.
 	// Operations involving the chunkserver are all communicated with the
@@ -79,6 +82,8 @@ func GetChunk(id string) *Chunk {
 	return chunksMap[id]
 }
 
+// BatchClearPendingDataNodes clear all pendingDataNodes of Chunk's id in the
+// given slice.
 func BatchClearPendingDataNodes(chunkIds []string) {
 	updateChunksLock.Lock()
 	defer updateChunksLock.Unlock()
@@ -89,6 +94,8 @@ func BatchClearPendingDataNodes(chunkIds []string) {
 	}
 }
 
+// BatchUpdatePendingDataNodes move all DataNode which have store the corresponding
+// Chunk successfully from that Chunk's pendingDataNodes to its dataNodes.
 func BatchUpdatePendingDataNodes(infos []util.ChunkSendResult) {
 	updateChunksLock.Lock()
 	defer updateChunksLock.Unlock()
@@ -102,12 +109,14 @@ func BatchUpdatePendingDataNodes(infos []util.ChunkSendResult) {
 	}
 }
 
+// BatchFilterChunk filter Chunk that still exist, and it's DataNode is not full
+// from given Chunk's id slice.
 func BatchFilterChunk(ids []string) []string {
 	updateChunksLock.RLock()
 	defer updateChunksLock.RUnlock()
 	chunkIds := make([]string, 0, len(ids))
 	for i := 0; i < len(ids); i++ {
-		// Chunk should still exist and it's DataNode is not full.
+		// Chunk should still exist, and it's DataNode is not full.
 		if chunk, ok := chunksMap[ids[i]]; ok {
 			if chunk.dataNodes.Cardinality()+chunk.pendingDataNodes.Cardinality() < viper.GetInt(common.ReplicaNum) {
 				chunkIds = append(chunkIds, ids[i])
@@ -215,9 +224,12 @@ func RestoreDeadChunkQueue(buf *bufio.Scanner) error {
 	return nil
 }
 
-// MonitorPendingChunk runs in a goroutine.
-// This function will monitor pendingChunkQueue.
-// Start copy chunks when timer elapse or the number of dead chunks equals to #{ChunkDeadChunkCopyThreshold}
+// MonitorPendingChunk runs in a goroutine. This function will keep looping to
+// check the pendingChunkQueue, there are 3 situations:
+// 1. The timer is up, allocate all pending chunks in the pendingChunkQueue.
+// 2. The lengths of the pendingChunkQueue is greater than or equal to the quantity
+//    of a batch, allocate a batch of pending chunks in the pendingChunkQueue.
+// 3. None of the above conditions are met，just do nothing.
 func MonitorPendingChunk(ctx context.Context) {
 	if pendingChunkQueue.Len() > 0 {
 		BatchAllocateChunks()
@@ -238,33 +250,16 @@ func MonitorPendingChunk(ctx context.Context) {
 	}
 }
 
-func BatchAllocateChunks() {
-	operation := &AllocateChunksOperation{
-		Id: util.GenerateUUIDString(),
-	}
-	data := getData4Apply(operation, common.OperationAllocateChunks)
-	applyFuture := GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
-	if err := applyFuture.Error(); err != nil {
-		logrus.Errorf("Fail to allocate a batch of chunks, error detail: %s,", err.Error())
-	}
-}
-
-// DoBatchAllocateChunks runs in a goroutine. It will get a batch of Chunk from
-// pendingChunkQueue and allocate a target DataNode to store for each Chunk.
+// BatchAllocateChunks runs in a goroutine. It will get a batch of Chunk from
+// pendingChunkQueue and the best plan which allocate a target DataNode to
+// store for each Chunk.
 // 1. Get batch of Chunk from pendingChunkQueue.
 // 2. Filter legal Chunk and alive DataNode.
 // 3. Get current store state(which Chunk is stored by which DataNode).
 // 4. Use DFS algorithm to get the best plan which decide the receiver and sender
 //    of every Chunk to make the number of Chunk received and send by each DataNode
 //    as balanced as possible(use variance to measure).
-// 5. Apply the best plan to all target Chunk and target DataNode.
-// 6. Remove the batch of Chunk from pendingChunkQueue.
-// (写给自己) 如果在这个过程进行当中，leader宕机，那么：
-// 问题1. 元数据的更新并不会commit到各个follower和新leader上。所以新leader并不知道这些deadChunk哪些存了，哪些没存。
-// 解决办法：新leader检查deadChunk的queue数量，如果里面有，直接进行保存。(后果可能会造成某些chunk多存储一份)
-// 问题2. 由于先进行复制，后写log，所以会造成log没有写完，但chunk已经复制完毕的情况。因此，活着的dataNode的chunkMap
-// 是和机器上实际情况不匹配的。但新leader的copy过程执行完毕且apply之后，会解决这个问题。
-func DoBatchAllocateChunks() {
+func BatchAllocateChunks() {
 	batchChunkIds := getPendingChunks()
 	chunkIds := BatchFilterChunk(batchChunkIds)
 	dataNodeIds := GetAliveDataNodeIds()
@@ -277,11 +272,35 @@ func DoBatchAllocateChunks() {
 		}
 	}
 	senderPlan := allocateChunksDFS(len(chunkIds), len(dataNodeIds), isStore)
-	BatchAllocateChunk(receiverPlan, chunkIds, dataNodeIds)
-	BatchAllocateDataNode(receiverPlan, senderPlan, chunkIds, dataNodeIds)
-	pendingChunkQueue.BatchPop(len(batchChunkIds))
+	operation := &AllocateChunksOperation{
+		Id:           util.GenerateUUIDString(),
+		SenderPlan:   senderPlan,
+		ReceiverPlan: receiverPlan,
+		ChunkIds:     chunkIds,
+		DataNodeIds:  dataNodeIds,
+		BatchLen:     len(batchChunkIds),
+	}
+	data := getData4Apply(operation, common.OperationAllocateChunks)
+	applyFuture := GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
+		logrus.Errorf("Fail to allocate a batch of chunks, error detail: %s,", err.Error())
+	}
 }
 
+// ApplyAllocatePlan will apply the given allocating plan. It will:
+// 1. Apply the best plan to all target Chunk.
+// 2. Apply the best plan to all target DataNode.
+// 3. Remove the batch of Chunk from pendingChunkQueue.
+func ApplyAllocatePlan(senderPlan []int, receiverPlan []int, chunkIds []string, dataNodeIds []string,
+	batchLen int) {
+	BatchAllocateChunk(receiverPlan, chunkIds, dataNodeIds)
+	BatchAllocateDataNode(receiverPlan, senderPlan, chunkIds, dataNodeIds)
+	pendingChunkQueue.BatchPop(batchLen)
+}
+
+// getPendingChunks get a batch of Chunk's id from the pendingChunkQueue. The
+// batch size is the minimum of the current len of the pendingChunkQueue and
+// the maximum size.
 func getPendingChunks() []string {
 	var (
 		maxCount  = viper.GetInt(common.ChunkDeadChunkCopyThreshold)
@@ -327,6 +346,7 @@ func getStoreState(chunkIds []string, dataNodeIds []string) [][]bool {
 	return isStore
 }
 
+// allocateChunksDFS calculate the best allocating plan base on the given information.
 func allocateChunksDFS(chunkNum int, dataNodeNum int, isStore [][]bool) []int {
 	currentResult := make([][]int, dataNodeNum)
 	for i := range currentResult {
@@ -344,6 +364,7 @@ func allocateChunksDFS(chunkNum int, dataNodeNum int, isStore [][]bool) []int {
 	return result
 }
 
+// calBestVariance calculate the minimum variance of current situation.
 func calBestVariance(chunkNum int, dataNodeNum int, avg int) int {
 	if avg*dataNodeNum == chunkNum {
 		return 0
@@ -351,6 +372,8 @@ func calBestVariance(chunkNum int, dataNodeNum int, avg int) int {
 	return chunkNum - (avg-1)*dataNodeNum
 }
 
+// dfs recursively find the best plan to make the allocation plan as uniform as
+// possible(use variance to measure).
 func dfs(chunkNum int, dataNodeNum int, chunkIndex int, dnIndex int, currentResult *[][]int,
 	isStore [][]bool, result *[]int, minValue *int, avg int, bestVariance int) bool {
 	if chunkIndex == chunkNum {

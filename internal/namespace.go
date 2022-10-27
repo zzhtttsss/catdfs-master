@@ -3,7 +3,6 @@ package internal
 import (
 	"bufio"
 	"container/list"
-	"context"
 	"fmt"
 	"github.com/hashicorp/raft"
 	"github.com/sirupsen/logrus"
@@ -333,39 +332,6 @@ func RenameFileNode(path string, newName string) (*FileNode, error) {
 
 func StatFileNode(path string) (*FileNode, error) {
 	return CheckAndGetFileNode(path)
-}
-
-func MonitorDirectory(ctx context.Context) {
-	//for {
-	//	select {
-	//	default:
-	//		updateMapLock.Lock()
-	//		for _, node := range dataNodeMap {
-	//			if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkWaitingTime)*
-	//				viper.GetInt(common.ChunkHeartbeatTime) || node.status == common.Alive {
-	//				node.status = common.Waiting
-	//				continue
-	//			}
-	//			if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) ||
-	//				node.status == common.Waiting {
-	//				node.status = common.Died
-	//				csCountMonitor.Dec()
-	//				operation := &DegradeOperation{
-	//					Id:         util.GenerateUUIDString(),
-	//					DataNodeId: node.Id,
-	//				}
-	//				data := getData4Apply(operation, common.OperationDegrade)
-	//				_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
-	//				continue
-	//			}
-	//		}
-	//		updateMapLock.Unlock()
-	//		logrus.WithContext(ctx).Infof("Complete a round of check, time: %s", time.Now().String())
-	//		time.Sleep(time.Duration(viper.GetInt(common.MasterCheckTime)) * time.Second)
-	//	case <-ctx.Done():
-	//		return
-	//	}
-	//}
 }
 
 func (f *FileNode) String() string {

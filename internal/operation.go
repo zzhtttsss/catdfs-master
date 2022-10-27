@@ -83,7 +83,11 @@ type HeartbeatOperation struct {
 }
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
-	logrus.Infof("heartbeat, id: %s", o.DataNodeId)
+	logrus.Infof("Heartbeat, id: %s", o.DataNodeId)
+	if len(o.FailInfos) != 0 || len(o.SuccessInfos) != 0 {
+		bytes, _ := json.Marshal(o)
+		logrus.Infof("Heartbeat operation detail: %s", string(bytes))
+	}
 	nextChunkInfos, ok := HeartbeatDataNode(o)
 	if !ok {
 		return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
@@ -148,6 +152,8 @@ func (o AddOperation) Apply() (interface{}, error) {
 		}
 		return rep, nil
 	case common.UnlockDic:
+		bytes, _ := json.Marshal(o)
+		logrus.Infof("Add operation detail: %s", string(bytes))
 		if len(o.FailChunkIds) != 0 {
 			_, _ = EraseFileNode(o.Path)
 		}
@@ -278,11 +284,16 @@ func (o DegradeOperation) Apply() (interface{}, error) {
 }
 
 type AllocateChunksOperation struct {
-	Id string `json:"id"`
+	Id           string   `json:"id"`
+	SenderPlan   []int    `json:"sender_plan"`
+	ReceiverPlan []int    `json:"receiver_plan"`
+	ChunkIds     []string `json:"chunk_ids"`
+	DataNodeIds  []string `json:"data_node_ids"`
+	BatchLen     int      `json:"batch_len"`
 }
 
 func (o AllocateChunksOperation) Apply() (interface{}, error) {
-	DoBatchAllocateChunks()
+	ApplyAllocatePlan(o.SenderPlan, o.ReceiverPlan, o.ChunkIds, o.DataNodeIds, o.BatchLen)
 	return nil, nil
 }
 
