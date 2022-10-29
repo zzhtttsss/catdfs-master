@@ -85,13 +85,6 @@ type HeartbeatOperation struct {
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
 	logrus.Infof("Heartbeat, id: %s", o.DataNodeId)
-	if len(o.FailInfos) != 0 || len(o.SuccessInfos) != 0 {
-		bytes, err := json.Marshal(o)
-		if err != nil {
-			logrus.Errorf("Fail to marshal HeartbeatOperation, error detail: %s", err.Error())
-		}
-		logrus.Infof("Heartbeat operation detail: %s", string(bytes))
-	}
 	nextChunkInfos, ok := UpdateDataNode4Heartbeat(o)
 	if !ok {
 		return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)

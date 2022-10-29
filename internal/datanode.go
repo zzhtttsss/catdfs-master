@@ -195,6 +195,7 @@ func UpdateDataNode4Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	dataNode.IOLoad = int(o.IOLoad)
 	for _, info := range o.SuccessInfos {
 		delete(dataNode.FutureSendChunks, info)
+		dataNodeMap[info.DataNodeId].Chunks.Add(info.ChunkId)
 	}
 	for _, info := range o.FailInfos {
 		delete(dataNode.FutureSendChunks, info)
@@ -205,11 +206,6 @@ func UpdateDataNode4Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 		if i != common.WaitToSend {
 			nextChunkInfos = append(nextChunkInfos, info)
 			dataNode.FutureSendChunks[info] = common.WaitToSend
-		}
-	}
-	for _, id := range o.ChunkIds {
-		if !dataNode.Chunks.Contains(id) {
-			dataNode.Chunks.Add(id)
 		}
 	}
 	return nextChunkInfos, true
