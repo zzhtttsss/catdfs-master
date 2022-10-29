@@ -375,6 +375,7 @@ func DoExpand(dataNode *DataNode) int {
 		pendingMap    = map[string][]string{}
 	)
 	// Shit !!!
+For:
 	for {
 		notFound := true
 		for _, node := range dataNodeMap {
@@ -389,7 +390,7 @@ func DoExpand(dataNode *DataNode) int {
 							pendingMap[node.Id] = []string{chunk.(string)}
 						}
 						if pendingChunks.Cardinality() == pendingCount {
-							goto label
+							break For
 						}
 						break
 					}
@@ -400,7 +401,6 @@ func DoExpand(dataNode *DataNode) int {
 			break
 		}
 	}
-label:
 	expandOperation := &ExpandOperation{
 		Id:           util.GenerateUUIDString(),
 		SenderPlan:   pendingMap,
