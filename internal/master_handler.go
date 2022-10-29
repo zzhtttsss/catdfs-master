@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	mapset "github.com/deckarep/golang-set"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb"
@@ -323,10 +324,14 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	p, _ := peer.FromContext(ctx)
 	address := strings.Split(p.Addr.String(), ":")[0]
 	logrus.WithContext(ctx).Infof("Get request for registering a datanode from chunkserver, address: %s", address)
+	need2Expand := IsNeed2Expand(len(args.ChunkIds))
+	dataNodeId := util.GenerateUUIDString()
+	// register first
 	operation := &RegisterOperation{
 		Id:         util.GenerateUUIDString(),
 		Address:    address,
-		DataNodeId: util.GenerateUUIDString(),
+		DataNodeId: dataNodeId,
+		ChunkIds:   args.ChunkIds,
 	}
 	data := getData4Apply(operation, common.OperationRegister)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
@@ -347,16 +352,67 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		})
 		return nil, details.Err()
 	}
+	// At that time, the new datanode has registered
+	pendingCount := 0
+	if need2Expand {
+		pendingCount = DoExpand(GetDataNode(dataNodeId))
+	}
 	id := response.Response.(string)
 	rep := &pb.DNRegisterReply{
-		Id: id,
+		Id:           id,
+		PendingCount: uint32(pendingCount),
 	}
 	logrus.WithContext(ctx).Infof("Success to register a datanode from chunkserver, address: %s, id: %s", address, id)
 	csCountMonitor.Inc()
 	return rep, nil
 }
 
-// Heartbeat is called by chunkserver. It sets the last heartbeat time to now to
+func DoExpand(dataNode *DataNode) int {
+	var (
+		pendingCount  = GetAvgChunkNum()
+		selfChunks    = dataNode.Chunks
+		pendingChunks = mapset.NewSet()
+		pendingMap    = map[string][]string{}
+	)
+	// Shit !!!
+	for {
+		notFound := true
+		for _, node := range dataNodeMap {
+			if node.status == common.Alive {
+				for chunk := range node.Chunks.Iter() {
+					if !pendingChunks.Contains(chunk) && !selfChunks.Contains(chunk) {
+						notFound = false
+						pendingChunks.Add(chunk)
+						if pendingDataNodeChunks, ok := pendingMap[node.Id]; ok {
+							pendingDataNodeChunks = append(pendingDataNodeChunks, chunk.(string))
+						} else {
+							pendingMap[node.Id] = []string{chunk.(string)}
+						}
+						if pendingChunks.Cardinality() == pendingCount {
+							goto label
+						}
+						break
+					}
+				}
+			}
+		}
+		if notFound {
+			break
+		}
+	}
+label:
+	expandOperation := &ExpandOperation{
+		Id:           util.GenerateUUIDString(),
+		SenderPlan:   pendingMap,
+		ReceiverPlan: dataNode.Id,
+		ChunkIds:     util.Interfaces2TypeArr[string](pendingChunks.ToSlice()),
+	}
+	data := getData4Apply(expandOperation, common.OperationExpand)
+	GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+	return pendingChunks.Cardinality()
+}
+
+// Heartbeat is called by chunkserver. It sets the last heartbeat time to now time to
 // maintain the connection between chunkserver and master.
 func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
 	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
@@ -405,6 +461,7 @@ func convChunkInfo(chunkInfos []*pb.ChunkInfo) []ChunkSendInfo {
 		chunkSendInfos[i] = ChunkSendInfo{
 			ChunkId:    chunkInfos[i].ChunkId,
 			DataNodeId: chunkInfos[i].DataNodeId,
+			SendType:   common.Copy,
 		}
 	}
 	return chunkSendInfos
@@ -416,12 +473,13 @@ func deConvChunkInfo(chunkSendInfos []ChunkSendInfo) []*pb.ChunkInfo {
 		chunkInfos[i] = &pb.ChunkInfo{
 			ChunkId:    chunkSendInfos[i].ChunkId,
 			DataNodeId: chunkSendInfos[i].DataNodeId,
+			SendType:   int32(chunkSendInfos[i].SendType),
 		}
 	}
 	return chunkInfos
 }
 
-// CheckArgs4Add is called by client. It check whether the path and file name
+// CheckArgs4Add is called by client. It checks whether the path and file name
 // entered by the user in the Add operation are legal.
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)

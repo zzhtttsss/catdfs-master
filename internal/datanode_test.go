@@ -51,14 +51,6 @@ func TestMain(m *testing.M) {
 			Leases:        mapset.NewSet(),
 			HeartbeatTime: time.Time{},
 		},
-		"dn6": {
-			Id:            "dn6",
-			status:        common.Alive,
-			Address:       "dn6:6789",
-			Chunks:        mapset.NewSet(),
-			Leases:        mapset.NewSet(),
-			HeartbeatTime: time.Time{},
-		},
 	}
 	m.Run()
 }

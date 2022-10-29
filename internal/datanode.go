@@ -201,8 +201,9 @@ func HeartbeatDataNode(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	}
 	nextChunkInfos := make([]ChunkSendInfo, 0, len(dataNode.FutureSendChunks))
 	for info, i := range dataNode.FutureSendChunks {
-		if i == common.WaitToSend {
+		if i != common.WaitToSend {
 			nextChunkInfos = append(nextChunkInfos, info)
+			dataNode.FutureSendChunks[info] = common.WaitToSend
 		}
 	}
 	// Todo 脑子不清醒，需要检查
@@ -272,6 +273,7 @@ func BatchAllocateDataNode(receiverPlan []int, senderPlan []int, chunkIds []stri
 		chunkSendInfo := ChunkSendInfo{
 			ChunkId:    chunkIds[i],
 			DataNodeId: dataNodeIds[receiverPlan[i]],
+			SendType:   common.Copy,
 		}
 		dataNodeMap[dataNodeIds[dnIndex]].FutureSendChunks[chunkSendInfo] = common.WaitToInform
 	}
@@ -292,6 +294,7 @@ func BatchAddChunks(infos []util.ChunkSendResult) {
 type ChunkSendInfo struct {
 	ChunkId    string `json:"chunk_id"`
 	DataNodeId string `json:"data_node_id"`
+	SendType   int    `json:"send_type"`
 }
 
 func DegradeDataNode(dataNodeId string, stage int) {
@@ -396,4 +399,25 @@ func RestoreDataNodes(buf *bufio.Scanner) error {
 		}
 	}
 	return nil
+}
+
+// IsNeed2Expand finds out whether to expand.
+func IsNeed2Expand(newChunkNum int) bool {
+	avgChunkNum := GetAvgChunkNum()
+	diff := avgChunkNum - newChunkNum
+	if diff >= 0 || diff <= 1 {
+		return false
+	}
+	return true
+}
+
+func GetAvgChunkNum() int {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	count := 0
+	for _, node := range dataNodeMap {
+		count += node.Chunks.Cardinality()
+	}
+	avgChunkNum := count / len(dataNodeMap)
+	return avgChunkNum
 }
