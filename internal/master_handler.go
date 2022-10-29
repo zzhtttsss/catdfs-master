@@ -555,14 +555,13 @@ func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAnd
 	return rep, nil
 }
 
-// GetDataNodes4Add is called by client. It allocates some DataNode to store a Chunk
-// and selects the primary DataNode.
+// GetDataNodes4Add is called by client. It allocates DataNode for a batch of Chunk.
 func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.GetDataNodes4AddArgs) (*pb.GetDataNodes4AddReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for getting dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
+	logrus.WithContext(ctx).Infof("Get request for getting dataNodes for single chunk from client, FileNodeId: %s, ChunkNum: %d", args.FileNodeId, args.ChunkNum)
 	operation := &AddOperation{
 		Id:         util.GenerateUUIDString(),
 		FileNodeId: args.FileNodeId,
-		ChunkIndex: args.ChunkIndex,
+		ChunkNum:   args.ChunkNum,
 		Stage:      common.GetDataNodes,
 	}
 	data := getData4Apply(operation, common.OperationAdd)
@@ -584,7 +583,7 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 		})
 		return nil, details.Err()
 	}
-	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
+	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk from client, FileNodeId: %s, ChunkNum: %d", args.FileNodeId, args.ChunkNum)
 	return (response.Response).(*pb.GetDataNodes4AddReply), nil
 }
 
@@ -621,7 +620,7 @@ func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.Get
 }
 
 // UnlockDic4Add is called by client. It unlocks all FileNode in the target path
-// which is used to add file.
+// which is used to add file and handle the result of the add operation.
 func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.UnlockDic4AddArgs) (*pb.UnlockDic4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for unlocking FileNodes in the target path from client, FileNodeId: %s", args.FileNodeId)
 	operation := &AddOperation{
@@ -859,11 +858,6 @@ func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.Check
 	logrus.WithContext(ctx).Infof("Success to check args and rename the specified file to a new name, path: %s", args.Path)
 	SuccessCountInc(handler.SelfAddr, common.OperationRename)
 	return rep, nil
-}
-
-type TransferDataNode struct {
-	fromDataNodeId string
-	toDataNodeId   string
 }
 
 func (handler *MasterHandler) Server() {

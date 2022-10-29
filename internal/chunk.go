@@ -76,10 +76,28 @@ func AddChunk(chunk *Chunk) {
 	chunksMap[chunk.Id] = chunk
 }
 
+func BatchAddChunk(chunks []*Chunk) {
+	updateChunksLock.Lock()
+	defer updateChunksLock.Unlock()
+	for _, chunk := range chunks {
+		chunksMap[chunk.Id] = chunk
+	}
+}
+
 func GetChunk(id string) *Chunk {
 	updateChunksLock.RLock()
 	defer updateChunksLock.RUnlock()
 	return chunksMap[id]
+}
+
+func BatchClearDataNode(chunkIds []interface{}, dataNodeId string) {
+	updateChunksLock.Lock()
+	defer updateChunksLock.Unlock()
+	for _, id := range chunkIds {
+		if chunk, ok := chunksMap[id.(string)]; ok {
+			chunk.dataNodes.Remove(dataNodeId)
+		}
+	}
 }
 
 // BatchClearPendingDataNodes clear all pendingDataNodes of Chunk's id in the
@@ -90,6 +108,7 @@ func BatchClearPendingDataNodes(chunkIds []string) {
 	for _, id := range chunkIds {
 		if chunk, ok := chunksMap[id]; ok {
 			chunk.pendingDataNodes.Clear()
+			pendingChunkQueue.Push(String(id))
 		}
 	}
 }
@@ -104,12 +123,15 @@ func BatchUpdatePendingDataNodes(infos []util.ChunkSendResult) {
 			for _, id := range info.SuccessDataNodes {
 				chunk.dataNodes.Add(id)
 			}
+			for i := 0; i < len(info.FailDataNodes); i++ {
+				pendingChunkQueue.Push(String(info.ChunkId))
+			}
 			chunk.pendingDataNodes.Clear()
 		}
 	}
 }
 
-// BatchFilterChunk filter Chunk that still exist, and it's DataNode is not full
+// BatchFilterChunk filter Chunk that still exists, and it's DataNode is not full
 // from given Chunk's id slice.
 func BatchFilterChunk(ids []string) []string {
 	updateChunksLock.RLock()
@@ -126,8 +148,8 @@ func BatchFilterChunk(ids []string) []string {
 	return chunkIds
 }
 
-// BatchAllocateChunk use the given plan to allocate DataNode for each Chunk.
-func BatchAllocateChunk(plan []int, chunkIds []string, dataNodeIds []string) {
+// BatchApplyPlan2Chunk use the given plan to allocate DataNode for each Chunk.
+func BatchApplyPlan2Chunk(plan []int, chunkIds []string, dataNodeIds []string) {
 	updateChunksLock.Lock()
 	defer updateChunksLock.Unlock()
 	for i, dnIndex := range plan {
@@ -196,7 +218,7 @@ func (q *PendingChunkQueue) String() string {
 	return q.queue.String()
 }
 
-func PersistDeadChunkQueue(sink raft.SnapshotSink) error {
+func PersistPendingChunkQueue(sink raft.SnapshotSink) error {
 	_, err := sink.Write([]byte(pendingChunkQueue.String()))
 	if err != nil {
 		return err
@@ -209,7 +231,7 @@ func PersistDeadChunkQueue(sink raft.SnapshotSink) error {
 	return nil
 }
 
-func RestoreDeadChunkQueue(buf *bufio.Scanner) error {
+func RestorePendingChunkQueue(buf *bufio.Scanner) error {
 	for buf.Scan() {
 		line := buf.Text()
 		if line == common.SnapshotDelimiter {
@@ -260,35 +282,37 @@ func MonitorPendingChunk(ctx context.Context) {
 //    of every Chunk to make the number of Chunk received and send by each DataNode
 //    as balanced as possible(use variance to measure).
 func BatchAllocateChunks() {
-	if pendingChunkQueue.Len() == 0 {
-		return
-	}
-	batchChunkIds := getPendingChunks()
-	chunkIds := BatchFilterChunk(batchChunkIds)
-	dataNodeIds := GetAliveDataNodeIds()
-	isStore := getStoreState(batchChunkIds, dataNodeIds)
-	logrus.Infof("isStore is: %v", isStore)
-	// Todo DataNode num is less than replicate num or other similar situation so that a Chunk can not find a DataNode to store.
-	receiverPlan := allocateChunksDFS(len(chunkIds), len(dataNodeIds), isStore)
-	for i := 0; i < len(isStore); i++ {
-		for j := 0; j < len(isStore[0]); j++ {
-			isStore[i][j] = !isStore[i][j]
+	logrus.Infof("Start to allocate a batch of chunks.")
+	if pendingChunkQueue.Len() != 0 {
+		batchChunkIds := getPendingChunks()
+		chunkIds := BatchFilterChunk(batchChunkIds)
+		dataNodeIds := GetAliveDataNodeIds()
+		isStore := getStoreState(chunkIds, dataNodeIds)
+		// Todo DataNode num is less than replicate num or other similar situation so that a Chunk can not find a DataNode to store.
+		receiverPlan := allocateChunksDFS(len(chunkIds), len(dataNodeIds), isStore)
+		for i := 0; i < len(isStore); i++ {
+			for j := 0; j < len(isStore[0]); j++ {
+				isStore[i][j] = !isStore[i][j]
+			}
+		}
+		senderPlan := allocateChunksDFS(len(chunkIds), len(dataNodeIds), isStore)
+		logrus.Debugf("Receiver plan is %v", receiverPlan)
+		logrus.Debugf("Sender plan is %v", senderPlan)
+		operation := &AllocateChunksOperation{
+			Id:           util.GenerateUUIDString(),
+			SenderPlan:   senderPlan,
+			ReceiverPlan: receiverPlan,
+			ChunkIds:     chunkIds,
+			DataNodeIds:  dataNodeIds,
+			BatchLen:     len(batchChunkIds),
+		}
+		data := getData4Apply(operation, common.OperationAllocateChunks)
+		applyFuture := GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+		if err := applyFuture.Error(); err != nil {
+			logrus.Errorf("Fail to allocate a batch of chunks, error detail: %s,", err.Error())
 		}
 	}
-	senderPlan := allocateChunksDFS(len(chunkIds), len(dataNodeIds), isStore)
-	operation := &AllocateChunksOperation{
-		Id:           util.GenerateUUIDString(),
-		SenderPlan:   senderPlan,
-		ReceiverPlan: receiverPlan,
-		ChunkIds:     chunkIds,
-		DataNodeIds:  dataNodeIds,
-		BatchLen:     len(batchChunkIds),
-	}
-	data := getData4Apply(operation, common.OperationAllocateChunks)
-	applyFuture := GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
-	if err := applyFuture.Error(); err != nil {
-		logrus.Errorf("Fail to allocate a batch of chunks, error detail: %s,", err.Error())
-	}
+	logrus.Infof("Suceess to allocate a batch of chunks.")
 }
 
 // ApplyAllocatePlan will apply the given allocating plan. It will:
@@ -297,8 +321,8 @@ func BatchAllocateChunks() {
 // 3. Remove the batch of Chunk from pendingChunkQueue.
 func ApplyAllocatePlan(senderPlan []int, receiverPlan []int, chunkIds []string, dataNodeIds []string,
 	batchLen int) {
-	BatchAllocateChunk(receiverPlan, chunkIds, dataNodeIds)
-	BatchAllocateDataNode(receiverPlan, senderPlan, chunkIds, dataNodeIds)
+	BatchApplyPlan2Chunk(receiverPlan, chunkIds, dataNodeIds)
+	BatchApplyPlan2DataNode(receiverPlan, senderPlan, chunkIds, dataNodeIds)
 	pendingChunkQueue.BatchPop(batchLen)
 }
 
@@ -328,22 +352,22 @@ func getPendingChunks() []string {
 func getStoreState(chunkIds []string, dataNodeIds []string) [][]bool {
 	updateChunksLock.RLock()
 	defer updateChunksLock.RUnlock()
-	isStore := make([][]bool, len(dataNodeIds))
+	isStore := make([][]bool, len(chunkIds))
 	for i := range isStore {
-		isStore[i] = make([]bool, len(chunkIds))
+		isStore[i] = make([]bool, len(dataNodeIds))
 	}
 	dnIndexMap := make(map[string]int)
 	for i, id := range dataNodeIds {
 		dnIndexMap[id] = i
 	}
-	for i, _ := range chunkIds {
-		chunk := chunksMap[chunkIds[i]]
-		dataNodesChan := chunk.dataNodes.Iter()
-		pendingDataNodesChan := chunk.pendingDataNodes.Iter()
-		for dnId := range dataNodesChan {
+	for i, id := range chunkIds {
+		chunk := chunksMap[id]
+		dataNodes := chunk.dataNodes.ToSlice()
+		pendingDataNodes := chunk.pendingDataNodes.ToSlice()
+		for _, dnId := range dataNodes {
 			isStore[i][dnIndexMap[dnId.(string)]] = true
 		}
-		for pdnId := range pendingDataNodesChan {
+		for _, pdnId := range pendingDataNodes {
 			isStore[i][dnIndexMap[pdnId.(string)]] = true
 		}
 	}
@@ -387,9 +411,9 @@ func dfs(chunkNum int, dataNodeNum int, chunkIndex int, dnIndex int, currentResu
 		}
 		if currentValue < *minValue {
 			*minValue = currentValue
-			for i := 0; i < dataNodeNum; i++ {
-				for j := 0; j < len((*currentResult)[i]); j++ {
-					(*result)[(*currentResult)[i][j]] = i
+			for j := 0; j < dataNodeNum; j++ {
+				for k := 0; k < len((*currentResult)[j]); k++ {
+					(*result)[(*currentResult)[j][k]] = j
 				}
 			}
 
@@ -415,14 +439,15 @@ func dfs(chunkNum int, dataNodeNum int, chunkIndex int, dnIndex int, currentResu
 	return false
 }
 
-// HeartbeatChunk delete the corresponding DataNode in the pendingDataNodes of
+// UpdateChunk4Heartbeat delete the corresponding DataNode in the pendingDataNodes of
 // each Chunk according to the Chunk sending information given by the heartbeat.
-func HeartbeatChunk(o HeartbeatOperation) {
+func UpdateChunk4Heartbeat(o HeartbeatOperation) {
 	updateChunksLock.Lock()
 	defer updateChunksLock.Unlock()
 	for _, info := range o.SuccessInfos {
 		if chunk, ok := chunksMap[info.ChunkId]; ok {
 			chunk.pendingDataNodes.Remove(info.DataNodeId)
+			chunk.dataNodes.Add(info.DataNodeId)
 		}
 	}
 	for _, info := range o.FailInfos {
