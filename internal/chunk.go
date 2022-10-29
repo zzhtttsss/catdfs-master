@@ -140,8 +140,6 @@ func BatchFilterChunk(ids []string) []string {
 	for i := 0; i < len(ids); i++ {
 		// Chunk should still exist, and it's DataNode is not full.
 		if chunk, ok := chunksMap[ids[i]]; ok {
-			logrus.Infof("dataNodes len is: %v, pendingDataNodes len is %v, dataNodes is %s",
-				chunk.dataNodes.Cardinality(), chunk.pendingDataNodes.Cardinality(), chunk.dataNodes.String())
 			if chunk.dataNodes.Cardinality()+chunk.pendingDataNodes.Cardinality() < viper.GetInt(common.ReplicaNum) {
 				chunkIds = append(chunkIds, ids[i])
 			}
@@ -287,13 +285,9 @@ func BatchAllocateChunks() {
 	logrus.Infof("Start to allocate a batch of chunks.")
 	if pendingChunkQueue.Len() != 0 {
 		batchChunkIds := getPendingChunks()
-		logrus.Infof("batchChunkIds is: %v", batchChunkIds)
 		chunkIds := BatchFilterChunk(batchChunkIds)
-		logrus.Infof("chunkIds is: %v", chunkIds)
 		dataNodeIds := GetAliveDataNodeIds()
-		logrus.Infof("dataNodeIds is: %v", chunkIds)
 		isStore := getStoreState(chunkIds, dataNodeIds)
-		logrus.Infof("isStore is: %v", isStore)
 		// Todo DataNode num is less than replicate num or other similar situation so that a Chunk can not find a DataNode to store.
 		receiverPlan := allocateChunksDFS(len(chunkIds), len(dataNodeIds), isStore)
 		for i := 0; i < len(isStore); i++ {
@@ -302,8 +296,8 @@ func BatchAllocateChunks() {
 			}
 		}
 		senderPlan := allocateChunksDFS(len(chunkIds), len(dataNodeIds), isStore)
-		logrus.Infof("receiver plan is %v", receiverPlan)
-		logrus.Infof("sender plan is %v", senderPlan)
+		logrus.Debugf("Receiver plan is %v", receiverPlan)
+		logrus.Debugf("Sender plan is %v", senderPlan)
 		operation := &AllocateChunksOperation{
 			Id:           util.GenerateUUIDString(),
 			SenderPlan:   senderPlan,
@@ -345,7 +339,6 @@ func getPendingChunks() []string {
 	} else {
 		copyCount = pendingChunkQueue.Len()
 	}
-	logrus.Infof("copyCount is: %v", copyCount)
 	batchTs := pendingChunkQueue.BatchTop(copyCount)
 	batchChunkIds := make([]string, len(batchTs))
 	for i := 0; i < len(batchTs); i++ {
@@ -367,25 +360,16 @@ func getStoreState(chunkIds []string, dataNodeIds []string) [][]bool {
 	for i, id := range dataNodeIds {
 		dnIndexMap[id] = i
 	}
-	logrus.Infof("dnIndexMap: %v.", dnIndexMap)
 	for i, id := range chunkIds {
 		chunk := chunksMap[id]
-		dataNodesChan := chunk.dataNodes.ToSlice()
-		pendingDataNodesChan := chunk.pendingDataNodes.ToSlice()
-		for _, dnId := range dataNodesChan {
-			logrus.Infof("i: %v, j: %v is true, dnid: %s.", i, dnIndexMap[dnId.(string)], dnId.(string))
+		dataNodes := chunk.dataNodes.ToSlice()
+		pendingDataNodes := chunk.pendingDataNodes.ToSlice()
+		for _, dnId := range dataNodes {
 			isStore[i][dnIndexMap[dnId.(string)]] = true
 		}
-		for _, pdnId := range pendingDataNodesChan {
+		for _, pdnId := range pendingDataNodes {
 			isStore[i][dnIndexMap[pdnId.(string)]] = true
 		}
-		//for dnId := range dataNodesChan {
-		//	logrus.Infof("i: %v, j: %v is true.", i, dnIndexMap[dnId.(string)])
-		//	isStore[i][dnIndexMap[dnId.(string)]] = true
-		//}
-		//for pdnId := range pendingDataNodesChan {
-		//	isStore[i][dnIndexMap[pdnId.(string)]] = true
-		//}
 	}
 	return isStore
 }
@@ -455,9 +439,9 @@ func dfs(chunkNum int, dataNodeNum int, chunkIndex int, dnIndex int, currentResu
 	return false
 }
 
-// HeartbeatChunk delete the corresponding DataNode in the pendingDataNodes of
+// UpdateChunk4Heartbeat delete the corresponding DataNode in the pendingDataNodes of
 // each Chunk according to the Chunk sending information given by the heartbeat.
-func HeartbeatChunk(o HeartbeatOperation) {
+func UpdateChunk4Heartbeat(o HeartbeatOperation) {
 	updateChunksLock.Lock()
 	defer updateChunksLock.Unlock()
 	for _, info := range o.SuccessInfos {

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"container/heap"
 	"context"
-	"encoding/json"
 	"fmt"
 	set "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
@@ -85,9 +84,9 @@ func (d *DataNode) String() string {
 // there are 3 situations:
 // 1. We have received heartbeat of this DataNode in 30 seconds. if the status
 //    of it is waiting, we will set status to alive, or we will do nothing.
-// 2. The status of DataNode is alive and we have not receive heartbeat of it
+// 2. The status of DataNode is alive, and we have not received heartbeat of it
 //    over 30 seconds, we will set status to waiting.
-// 3. The status of DataNode is waiting and we have not receive heartbeat of it
+// 3. The status of DataNode is waiting, and we have not received heartbeat of it
 //    over 10 minute, we will think this DataNode is dead and start a shrink.
 func MonitorHeartbeat(ctx context.Context) {
 	for {
@@ -96,7 +95,7 @@ func MonitorHeartbeat(ctx context.Context) {
 			updateMapLock.Lock()
 			for _, node := range dataNodeMap {
 				logrus.Debugf("Datanode id: %s, chunk set: %s", node.Id, node.Chunks.String())
-				// give died datanode a second chance to restart.
+				// Give died datanode a second chance to restart.
 				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkWaitingTime)*
 					viper.GetInt(common.ChunkHeartbeatTime) && node.status == common.Alive {
 					operation := &DegradeOperation{
@@ -182,8 +181,9 @@ func GetDataNode(id string) *DataNode {
 	return dataNodeMap[id]
 }
 
-// HeartbeatDataNode is
-func HeartbeatDataNode(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
+// UpdateDataNode4Heartbeat updates DataNode according to the Chunk sending
+// information given by the heartbeat.
+func UpdateDataNode4Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	updateMapLock.Lock()
 	defer updateMapLock.Unlock()
 	dataNode, ok := dataNodeMap[o.DataNodeId]
@@ -207,23 +207,11 @@ func HeartbeatDataNode(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 			dataNode.FutureSendChunks[info] = common.WaitToSend
 		}
 	}
-	// Todo 脑子不清醒，需要检查
 	for _, id := range o.ChunkIds {
 		if !dataNode.Chunks.Contains(id) {
 			dataNode.Chunks.Add(id)
 		}
 	}
-
-	// Debug
-	if len(nextChunkInfos) != 0 {
-		bytes, err := json.Marshal(nextChunkInfos)
-		logrus.Infof("nextChunkInfos is %s", string(bytes))
-		if err != nil {
-			logrus.Errorf("Fail to marshal nextChunkInfos, error detail: %s", err.Error())
-		}
-		logrus.Infof("nextChunkInfos detail: %s", string(bytes))
-	}
-
 	return nextChunkInfos, true
 }
 
@@ -303,8 +291,12 @@ type ChunkSendInfo struct {
 	DataNodeId string `json:"data_node_id"`
 }
 
+// DegradeDataNode degrade a DataNode based on given stage. If DataNode is dead,
+// it will remove DataNode from dataNodeMap and put all Chunk's id in Chunks and
+// FutureSendChunks of the DataNode to pendingChunkQueue so that system can make
+// up the missing copies later
 func DegradeDataNode(dataNodeId string, stage int) {
-	logrus.Infof("start to degrade, datanode id: %s, stage: %v", dataNodeId, stage)
+	logrus.Infof("Start to degrade, datanode id: %s, stage: %v", dataNodeId, stage)
 	updateMapLock.Lock()
 	defer updateMapLock.Unlock()
 	dataNode, ok := dataNodeMap[dataNodeId]
@@ -316,7 +308,7 @@ func DegradeDataNode(dataNodeId string, stage int) {
 		return
 	}
 	delete(dataNodeMap, dataNodeId)
-	logrus.Infof("degrade datanode chunks is: %s, len is: %v", dataNode.Chunks.String(), dataNode.Chunks.Cardinality())
+	logrus.Debugf("Degrade datanode chunks is: %s, len is: %v", dataNode.Chunks.String(), dataNode.Chunks.Cardinality())
 	for _, chunkId := range dataNode.Chunks.ToSlice() {
 		pendingChunkQueue.Push(String(chunkId.(string)))
 	}
@@ -324,7 +316,7 @@ func DegradeDataNode(dataNodeId string, stage int) {
 	for info := range dataNode.FutureSendChunks {
 		pendingChunkQueue.Push(String(info.ChunkId))
 	}
-	logrus.Infof("current pendingChunkQueue len is: %v", pendingChunkQueue.Len())
+	logrus.Infof("Success to degrade, datanode id: %s, stage: %v", dataNodeId, stage)
 }
 
 // AllocateDataNodes Select several DataNode to store a Chunk. DataNode allocation

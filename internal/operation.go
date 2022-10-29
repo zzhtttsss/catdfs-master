@@ -92,11 +92,11 @@ func (o HeartbeatOperation) Apply() (interface{}, error) {
 		}
 		logrus.Infof("Heartbeat operation detail: %s", string(bytes))
 	}
-	nextChunkInfos, ok := HeartbeatDataNode(o)
+	nextChunkInfos, ok := UpdateDataNode4Heartbeat(o)
 	if !ok {
 		return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
 	}
-	HeartbeatChunk(o)
+	UpdateChunk4Heartbeat(o)
 	return nextChunkInfos, nil
 }
 
@@ -150,7 +150,7 @@ func (o AddOperation) Apply() (interface{}, error) {
 				dataNodes:        set.NewSet(),
 				pendingDataNodes: dataNodeIdSet,
 			}
-			logrus.Infof("chunk index: %v, dnIds: %v, dnAdds: %v", i, dnIds, dnAdds)
+			logrus.Debugf("Chunk index: %v, dnIds: %v, dnAdds: %v", i, dnIds, dnAdds)
 			chunks[i] = chunk
 			dataNodeIds[i] = &pb.GetDataNodes4AddReply_Array{
 				Items: dnIds,
@@ -166,8 +166,6 @@ func (o AddOperation) Apply() (interface{}, error) {
 		}
 		return rep, nil
 	case common.UnlockDic:
-		bytes, _ := json.Marshal(o)
-		logrus.Infof("Add operation detail: %s", string(bytes))
 		if o.FailChunkIds != nil {
 			_, _ = EraseFileNode(o.Path)
 			BatchClearPendingDataNodes(o.FailChunkIds)
@@ -217,7 +215,6 @@ type MkdirOperation struct {
 }
 
 func (o MkdirOperation) Apply() (interface{}, error) {
-	logrus.Infof("mkdir, path: %s, filename: %s", o.Path, o.FileName)
 	return AddFileNode(o.Path, o.FileName, common.DirSize, false)
 }
 
@@ -228,7 +225,6 @@ type MoveOperation struct {
 }
 
 func (o MoveOperation) Apply() (interface{}, error) {
-	logrus.Infof("move, SourcePath: %s, TargetPath: %s", o.SourcePath, o.TargetPath)
 	return MoveFileNode(o.SourcePath, o.TargetPath)
 }
 
@@ -238,7 +234,6 @@ type RemoveOperation struct {
 }
 
 func (o RemoveOperation) Apply() (interface{}, error) {
-	logrus.Infof("remove, path: %s", o.Path)
 	return RemoveFileNode(o.Path)
 }
 
@@ -248,7 +243,6 @@ type ListOperation struct {
 }
 
 func (o ListOperation) Apply() (interface{}, error) {
-	logrus.Infof("list, path: %s", o.Path)
 	fileNodes, err := ListFileNode(o.Path)
 	return fileNode2FileInfo(fileNodes), err
 }
@@ -259,7 +253,6 @@ type StatOperation struct {
 }
 
 func (o StatOperation) Apply() (interface{}, error) {
-	logrus.Infof("stat, path: %s", o.Path)
 	return StatFileNode(o.Path)
 }
 
@@ -270,7 +263,6 @@ type RenameOperation struct {
 }
 
 func (o RenameOperation) Apply() (interface{}, error) {
-	logrus.Infof("rename, path: %s, newName: %s", o.Path, o.NewName)
 	return RenameFileNode(o.Path, o.NewName)
 }
 
@@ -307,11 +299,6 @@ type AllocateChunksOperation struct {
 }
 
 func (o AllocateChunksOperation) Apply() (interface{}, error) {
-	bytes, err := json.Marshal(o)
-	if err != nil {
-		logrus.Errorf("Fail to marshal AllocateChunksOperation, error detail: %s", err.Error())
-	}
-	logrus.Infof("AllocateChunks operation detail: %s", string(bytes))
 	ApplyAllocatePlan(o.SenderPlan, o.ReceiverPlan, o.ChunkIds, o.DataNodeIds, o.BatchLen)
 	return nil, nil
 }
