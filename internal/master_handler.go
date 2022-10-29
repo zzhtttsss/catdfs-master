@@ -461,7 +461,7 @@ func convChunkInfo(chunkInfos []*pb.ChunkInfo) []ChunkSendInfo {
 		chunkSendInfos[i] = ChunkSendInfo{
 			ChunkId:    chunkInfos[i].ChunkId,
 			DataNodeId: chunkInfos[i].DataNodeId,
-			SendType:   common.Copy,
+			SendType:   int(chunkInfos[i].SendType),
 		}
 	}
 	return chunkSendInfos
