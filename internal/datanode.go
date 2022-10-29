@@ -95,7 +95,7 @@ func MonitorHeartbeat(ctx context.Context) {
 		default:
 			updateMapLock.Lock()
 			for _, node := range dataNodeMap {
-				logrus.Infof("datanode id: %s, chunk set: %s", node.Id, node.Chunks.String())
+				logrus.Debugf("Datanode id: %s, chunk set: %s", node.Id, node.Chunks.String())
 				// give died datanode a second chance to restart.
 				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkWaitingTime)*
 					viper.GetInt(common.ChunkHeartbeatTime) && node.status == common.Alive {
@@ -213,15 +213,17 @@ func HeartbeatDataNode(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 			dataNode.Chunks.Add(id)
 		}
 	}
+
+	// Debug
 	if len(nextChunkInfos) != 0 {
-		bytes, _ := json.Marshal(nextChunkInfos)
+		bytes, err := json.Marshal(nextChunkInfos)
 		logrus.Infof("nextChunkInfos is %s", string(bytes))
+		if err != nil {
+			logrus.Errorf("Fail to marshal nextChunkInfos, error detail: %s", err.Error())
+		}
+		logrus.Infof("nextChunkInfos detail: %s", string(bytes))
 	}
-	bytes, err := json.Marshal(nextChunkInfos)
-	if err != nil {
-		logrus.Errorf("Fail to marshal nextChunkInfos, error detail: %s", err.Error())
-	}
-	logrus.Infof("nextChunkInfos detail: %s", string(bytes))
+
 	return nextChunkInfos, true
 }
 
@@ -271,8 +273,8 @@ func GetDataNodeAddresses(chunkSendInfos []ChunkSendInfo) []string {
 	return adds
 }
 
-// BatchAllocateDataNode use the given plan to allocate Chunk for each DataNode.
-func BatchAllocateDataNode(receiverPlan []int, senderPlan []int, chunkIds []string, dataNodeIds []string) {
+// BatchApplyPlan2DataNode use the given plan to allocate Chunk for each DataNode.
+func BatchApplyPlan2DataNode(receiverPlan []int, senderPlan []int, chunkIds []string, dataNodeIds []string) {
 	updateMapLock.Lock()
 	defer updateMapLock.Unlock()
 	for i, dnIndex := range senderPlan {
@@ -325,7 +327,8 @@ func DegradeDataNode(dataNodeId string, stage int) {
 	logrus.Infof("current pendingChunkQueue len is: %v", pendingChunkQueue.Len())
 }
 
-// AllocateDataNodes Select several DataNode to store a Chunk. DataNode allocation strategy is:
+// AllocateDataNodes Select several DataNode to store a Chunk. DataNode allocation
+// strategy is:
 // 1. Reload dataNodeHeap with all DataNode.
 // 2. Select the first "ReplicaNum" dataNodes with the least number of memory Chunk.
 func AllocateDataNodes() []*DataNode {
@@ -345,6 +348,38 @@ func AllocateDataNodes() []*DataNode {
 	return allDataNodes
 }
 
+// BatchAllocateDataNodes allocate DataNode for a batch of Chunk. Each Chunk will
+// get ReplicaNum DataNode to store it.
+func BatchAllocateDataNodes(chunkNum int) [][]*DataNode {
+	updateMapLock.RLock()
+	updateHeapLock.Lock()
+	processMap := make(map[*DataNode]int)
+	allDataNodes := make([][]*DataNode, chunkNum)
+	for _, node := range dataNodeMap {
+		if node.status == common.Alive {
+			processMap[node] = 0
+		}
+	}
+	for i := 0; i < chunkNum; i++ {
+		// Todo if Chunk num is same, choose the DataNode with less IOLoad.
+		dataNodeHeap.dns = dataNodeHeap.dns[0:0]
+		for _, node := range dataNodeMap {
+			if node.status == common.Alive {
+				adjust4batch(node, processMap)
+			}
+		}
+		currentDataNodes := make([]*DataNode, dataNodeHeap.Len())
+		copy(currentDataNodes, dataNodeHeap.dns)
+		for _, node := range currentDataNodes {
+			processMap[node] += 1
+		}
+		allDataNodes[i] = currentDataNodes
+	}
+	updateHeapLock.Unlock()
+	updateMapLock.RUnlock()
+	return allDataNodes
+}
+
 // adjust tries to put a DataNode into dataNodeHeap. If this DataNode meets the
 // requirements of dataNodeHeap, put it into dataNodeHeap, otherwise do nothing.
 func adjust(node *DataNode) {
@@ -353,6 +388,24 @@ func adjust(node *DataNode) {
 	} else {
 		topNode := heap.Pop(&dataNodeHeap).(*DataNode)
 		if topNode.Chunks.Cardinality() > node.Chunks.Cardinality() {
+			heap.Push(&dataNodeHeap, node)
+		} else {
+			heap.Push(&dataNodeHeap, topNode)
+		}
+	}
+}
+
+// adjust4batch is used when provisional results(have not been flush to Chunks of
+// DataNode) need to be considered. It tries to put a DataNode into dataNodeHeap
+// considering the processMap given. The processMap contains how many Chunk have
+// been allocated to those alive DataNode until now. If this DataNode meets the
+// requirements of dataNodeHeap, put it into dataNodeHeap, otherwise do nothing.
+func adjust4batch(node *DataNode, processMap map[*DataNode]int) {
+	if dataNodeHeap.Len() < viper.GetInt(common.ReplicaNum) {
+		heap.Push(&dataNodeHeap, node)
+	} else {
+		topNode := heap.Pop(&dataNodeHeap).(*DataNode)
+		if topNode.Chunks.Cardinality()+processMap[topNode] > node.Chunks.Cardinality()+processMap[node] {
 			heap.Push(&dataNodeHeap, node)
 		} else {
 			heap.Push(&dataNodeHeap, topNode)

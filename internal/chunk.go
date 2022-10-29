@@ -76,6 +76,14 @@ func AddChunk(chunk *Chunk) {
 	chunksMap[chunk.Id] = chunk
 }
 
+func BatchAddChunk(chunks []*Chunk) {
+	updateChunksLock.Lock()
+	defer updateChunksLock.Unlock()
+	for _, chunk := range chunks {
+		chunksMap[chunk.Id] = chunk
+	}
+}
+
 func GetChunk(id string) *Chunk {
 	updateChunksLock.RLock()
 	defer updateChunksLock.RUnlock()
@@ -100,6 +108,7 @@ func BatchClearPendingDataNodes(chunkIds []string) {
 	for _, id := range chunkIds {
 		if chunk, ok := chunksMap[id]; ok {
 			chunk.pendingDataNodes.Clear()
+			pendingChunkQueue.Push(String(id))
 		}
 	}
 }
@@ -113,6 +122,9 @@ func BatchUpdatePendingDataNodes(infos []util.ChunkSendResult) {
 		if chunk, ok := chunksMap[info.ChunkId]; ok {
 			for _, id := range info.SuccessDataNodes {
 				chunk.dataNodes.Add(id)
+			}
+			for i := 0; i < len(info.FailDataNodes); i++ {
+				pendingChunkQueue.Push(String(info.ChunkId))
 			}
 			chunk.pendingDataNodes.Clear()
 		}
@@ -138,8 +150,8 @@ func BatchFilterChunk(ids []string) []string {
 	return chunkIds
 }
 
-// BatchAllocateChunk use the given plan to allocate DataNode for each Chunk.
-func BatchAllocateChunk(plan []int, chunkIds []string, dataNodeIds []string) {
+// BatchApplyPlan2Chunk use the given plan to allocate DataNode for each Chunk.
+func BatchApplyPlan2Chunk(plan []int, chunkIds []string, dataNodeIds []string) {
 	updateChunksLock.Lock()
 	defer updateChunksLock.Unlock()
 	for i, dnIndex := range plan {
@@ -315,8 +327,8 @@ func BatchAllocateChunks() {
 // 3. Remove the batch of Chunk from pendingChunkQueue.
 func ApplyAllocatePlan(senderPlan []int, receiverPlan []int, chunkIds []string, dataNodeIds []string,
 	batchLen int) {
-	BatchAllocateChunk(receiverPlan, chunkIds, dataNodeIds)
-	BatchAllocateDataNode(receiverPlan, senderPlan, chunkIds, dataNodeIds)
+	BatchApplyPlan2Chunk(receiverPlan, chunkIds, dataNodeIds)
+	BatchApplyPlan2DataNode(receiverPlan, senderPlan, chunkIds, dataNodeIds)
 	pendingChunkQueue.BatchPop(batchLen)
 }
 

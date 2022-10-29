@@ -106,7 +106,7 @@ type AddOperation struct {
 	FileName     string                 `json:"file_name"`
 	Size         int64                  `json:"size"`
 	FileNodeId   string                 `json:"file_node_id"`
-	ChunkIndex   int32                  `json:"chunk_index"`
+	ChunkNum     int32                  `json:"chunk_num"`
 	ChunkId      string                 `json:"chunk_id"`
 	Infos        []util.ChunkSendResult `json:"infos"`
 	FailChunkIds []string               `json:"fail_chunk_ids"`
@@ -129,38 +129,49 @@ func (o AddOperation) Apply() (interface{}, error) {
 		}
 		return rep, nil
 	case common.GetDataNodes:
-		chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.Itoa(int(o.ChunkIndex))
-		dataNodes := AllocateDataNodes()
-		var (
-			dataNodeIdSet = set.NewSet()
-			dataNodeIds   = make([]string, len(dataNodes))
-			dataNodeAddrs = make([]string, len(dataNodes))
-		)
-		for i, node := range dataNodes {
-			dataNodeIdSet.Add(node.Id)
-			dataNodeIds[i] = node.Id
-			dataNodeAddrs[i] = node.Address
+		dataNodes := BatchAllocateDataNodes(int(o.ChunkNum))
+		chunks := make([]*Chunk, o.ChunkNum)
+		dataNodeIds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
+		dataNodeAdds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
+		for i := 0; i < int(o.ChunkNum); i++ {
+			chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.Itoa(i)
+			var (
+				dataNodeIdSet = set.NewSet()
+				dnIds         = make([]string, len(dataNodes[0]))
+				dnAdds        = make([]string, len(dataNodes[0]))
+			)
+			for i, node := range dataNodes[i] {
+				dataNodeIdSet.Add(node.Id)
+				dnIds[i] = node.Id
+				dnAdds[i] = node.Address
+			}
+			chunk := &Chunk{
+				Id:               chunkId,
+				dataNodes:        set.NewSet(),
+				pendingDataNodes: dataNodeIdSet,
+			}
+			logrus.Infof("chunk index: %v, dnIds: %v, dnAdds: %v", i, dnIds, dnAdds)
+			chunks[i] = chunk
+			dataNodeIds[i] = &pb.GetDataNodes4AddReply_Array{
+				Items: dnIds,
+			}
+			dataNodeAdds[i] = &pb.GetDataNodes4AddReply_Array{
+				Items: dnAdds,
+			}
 		}
-
-		chunk := &Chunk{
-			Id:               chunkId,
-			dataNodes:        set.NewSet(),
-			pendingDataNodes: dataNodeIdSet,
-		}
-		AddChunk(chunk)
+		BatchAddChunk(chunks)
 		rep := &pb.GetDataNodes4AddReply{
-			DataNodes:   dataNodeAddrs,
-			DataNodeIds: dataNodeIds,
+			DataNodeIds:  dataNodeIds,
+			DataNodeAdds: dataNodeAdds,
 		}
-		logrus.Infof("GetDataNodes dataNodeIds is: %v", dataNodeIds)
 		return rep, nil
 	case common.UnlockDic:
 		bytes, _ := json.Marshal(o)
 		logrus.Infof("Add operation detail: %s", string(bytes))
 		if o.FailChunkIds != nil {
 			_, _ = EraseFileNode(o.Path)
+			BatchClearPendingDataNodes(o.FailChunkIds)
 		}
-		BatchClearPendingDataNodes(o.FailChunkIds)
 		BatchUpdatePendingDataNodes(o.Infos)
 		BatchAddChunks(o.Infos)
 		err := UnlockFileNodesById(o.FileNodeId, false)

@@ -500,11 +500,11 @@ func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAnd
 // GetDataNodes4Add is called by client. It allocates some DataNode to store a Chunk
 // and selects the primary DataNode.
 func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.GetDataNodes4AddArgs) (*pb.GetDataNodes4AddReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for getting dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
+	logrus.WithContext(ctx).Infof("Get request for getting dataNodes for single chunk from client, FileNodeId: %s, ChunkNum: %d", args.FileNodeId, args.ChunkNum)
 	operation := &AddOperation{
 		Id:         util.GenerateUUIDString(),
 		FileNodeId: args.FileNodeId,
-		ChunkIndex: args.ChunkIndex,
+		ChunkNum:   args.ChunkNum,
 		Stage:      common.GetDataNodes,
 	}
 	data := getData4Apply(operation, common.OperationAdd)
@@ -526,7 +526,7 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 		})
 		return nil, details.Err()
 	}
-	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
+	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk from client, FileNodeId: %s, ChunkNum: %d", args.FileNodeId, args.ChunkNum)
 	return (response.Response).(*pb.GetDataNodes4AddReply), nil
 }
 
