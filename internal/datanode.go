@@ -265,6 +265,7 @@ func BatchApplyPlan2DataNode(receiverPlan []int, senderPlan []int, chunkIds []st
 		chunkSendInfo := ChunkSendInfo{
 			ChunkId:    chunkIds[i],
 			DataNodeId: dataNodeIds[receiverPlan[i]],
+			SendType:   common.Copy,
 		}
 		dataNodeMap[dataNodeIds[dnIndex]].FutureSendChunks[chunkSendInfo] = common.WaitToInform
 	}
@@ -285,6 +286,7 @@ func BatchAddChunks(infos []util.ChunkSendResult) {
 type ChunkSendInfo struct {
 	ChunkId    string `json:"chunk_id"`
 	DataNodeId string `json:"data_node_id"`
+	SendType   int    `json:"send_type"`
 }
 
 // DegradeDataNode degrade a DataNode based on given stage. If DataNode is dead,
@@ -447,4 +449,25 @@ func RestoreDataNodes(buf *bufio.Scanner) error {
 		}
 	}
 	return nil
+}
+
+// IsNeed2Expand finds out whether to expand.
+func IsNeed2Expand(newChunkNum int) bool {
+	avgChunkNum := GetAvgChunkNum()
+	diff := avgChunkNum - newChunkNum
+	if diff >= 0 || diff <= 1 {
+		return false
+	}
+	return true
+}
+
+func GetAvgChunkNum() int {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	count := 0
+	for _, node := range dataNodeMap {
+		count += node.Chunks.Cardinality()
+	}
+	avgChunkNum := count / len(dataNodeMap)
+	return avgChunkNum
 }

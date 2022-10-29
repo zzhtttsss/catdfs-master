@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
+	"time"
 )
 
 func createRootFile(rootA *FileNode) func() {
@@ -103,6 +105,18 @@ func TestRead(t *testing.T) {
 }
 
 func TestHeartbeatOperation_Apply(t *testing.T) {
-	a := []string{"a", "b", "c"}
-	fmt.Println(a[0:0])
+	timer := time.NewTimer(5 * time.Second)
+	for true {
+		select {
+		case <-timer.C:
+			fmt.Println("Timer arrive")
+			timer = nil
+			return
+		default:
+			for i := 1; i <= 10; i++ {
+				time.Sleep(time.Second)
+				fmt.Println(strconv.Itoa(i) + "s passes")
+			}
+		}
+	}
 }

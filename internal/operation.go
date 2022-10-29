@@ -52,14 +52,25 @@ type OpContainer struct {
 }
 
 type RegisterOperation struct {
-	Id         string `json:"id"`
-	Address    string `json:"address"`
-	DataNodeId string `json:"data_node_id"`
+	Id         string   `json:"id"`
+	Address    string   `json:"address"`
+	DataNodeId string   `json:"data_node_id"`
+	ChunkIds   []string `json:"chunkIds"`
 }
 
 func (o RegisterOperation) Apply() (interface{}, error) {
 	logrus.Infof("register, address: %s", o.Address)
+	newSet := set.NewSet()
+	for _, id := range o.ChunkIds {
+		newSet.Add(id)
+	}
 	datanode := &DataNode{
+		Id:            o.DataNodeId,
+		status:        common.Cold,
+		Address:       o.Address,
+		Chunks:        newSet,
+		IOLoad:        0,
+		HeartbeatTime: time.Now(),
 		Id:               o.DataNodeId,
 		status:           common.Alive,
 		Address:          o.Address,
@@ -68,7 +79,6 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 		IOLoad:           0,
 		HeartbeatTime:    time.Now(),
 	}
-
 	AddDataNode(datanode)
 	logrus.Infof("[Id=%s] Connected", o.DataNodeId)
 	return o.DataNodeId, nil
@@ -297,4 +307,33 @@ func (o AllocateChunksOperation) Apply() (interface{}, error) {
 }
 
 type ExpandOperation struct {
+	Id           string              `json:"id"`
+	SenderPlan   map[string][]string `json:"sender_plan"`
+	ReceiverPlan string              `json:"receiver_plan"`
+	ChunkIds     []string            `json:"chunk_ids"`
+}
+
+func (e ExpandOperation) Apply() (interface{}, error) {
+	logrus.Infof("Apply expand operation with dataNode #%s", e.ReceiverPlan)
+	updateMapLock.Lock()
+	for fromNodeId, targetChunks := range e.SenderPlan {
+		fromNode := dataNodeMap[fromNodeId]
+		for _, chunkId := range targetChunks {
+			newFutureSendPlan := ChunkSendInfo{
+				ChunkId:    chunkId,
+				DataNodeId: e.ReceiverPlan,
+				SendType:   common.Move,
+			}
+			fromNode.FutureSendChunks[newFutureSendPlan] = common.WaitToInform
+		}
+	}
+	updateMapLock.Unlock()
+	updateChunksLock.Lock()
+	for _, chunkId := range e.ChunkIds {
+		if chunk, ok := chunksMap[chunkId]; ok {
+			chunk.pendingDataNodes.Add(e.ReceiverPlan)
+		}
+	}
+	updateChunksLock.Unlock()
+	return nil, nil
 }
