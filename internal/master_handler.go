@@ -367,6 +367,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	return rep, nil
 }
 
+// DoExpand gets the chunk copied according to this new dataNode
 func DoExpand(dataNode *DataNode) int {
 	var (
 		pendingCount  = GetAvgChunkNum()
@@ -374,7 +375,7 @@ func DoExpand(dataNode *DataNode) int {
 		pendingChunks = mapset.NewSet()
 		pendingMap    = map[string][]string{}
 	)
-	// Shit !!!
+	// can not stop util not finding the dataNode to copy
 For:
 	for {
 		notFound := true
