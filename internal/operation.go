@@ -10,11 +10,13 @@ import (
 	"time"
 	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
+	"tinydfs-base/util"
 )
 
 var (
-	// OpTypeMap is used to include all types of Operation. When implementing a new type of Operation, we should put
-	// <name of operation, type of operation> into this map.
+	// OpTypeMap is used to include all types of Operation. When implementing
+	// a new type of Operation, we should put <name of operation, type of
+	// operation> into this map.
 	OpTypeMap = make(map[string]reflect.Type)
 )
 
@@ -29,6 +31,9 @@ func init() {
 	OpTypeMap[common.OperationList] = reflect.TypeOf(ListOperation{})
 	OpTypeMap[common.OperationStat] = reflect.TypeOf(StatOperation{})
 	OpTypeMap[common.OperationRename] = reflect.TypeOf(RenameOperation{})
+	OpTypeMap[common.OperationAllocateChunks] = reflect.TypeOf(AllocateChunksOperation{})
+	OpTypeMap[common.OperationExpand] = reflect.TypeOf(ExpandOperation{})
+	OpTypeMap[common.OperationDegrade] = reflect.TypeOf(DegradeOperation{})
 }
 
 // Operation represents requests to make changes to metadata. If we want to modify the metadata,
@@ -39,8 +44,8 @@ type Operation interface {
 	Apply() (interface{}, error)
 }
 
-// OpContainer is used to encapsulate Operation so that it can be turned into specific type of Operation
-// when be deserialized from bytes.
+// OpContainer is used to encapsulate Operation so that it can be turned into
+// specific type of Operation when be deserialized from bytes.
 type OpContainer struct {
 	OpType string          `json:"op_type"`
 	OpData json.RawMessage `json:"op_data"`
@@ -55,44 +60,50 @@ type RegisterOperation struct {
 func (o RegisterOperation) Apply() (interface{}, error) {
 	logrus.Infof("register, address: %s", o.Address)
 	datanode := &DataNode{
-		Id:            o.DataNodeId,
-		status:        common.Alive,
-		Address:       o.Address,
-		Chunks:        set.NewSet(),
-		Leases:        set.NewSet(),
-		HeartbeatTime: time.Now(),
+		Id:               o.DataNodeId,
+		status:           common.Alive,
+		Address:          o.Address,
+		Chunks:           set.NewSet(),
+		FutureSendChunks: make(map[ChunkSendInfo]int),
+		IOLoad:           0,
+		HeartbeatTime:    time.Now(),
 	}
 
 	AddDataNode(datanode)
-	Adjust4Add(datanode)
 	logrus.Infof("[Id=%s] Connected", o.DataNodeId)
 	return o.DataNodeId, nil
 }
 
 type HeartbeatOperation struct {
-	Id         string   `json:"id"`
-	DataNodeId string   `json:"data_node_id"`
-	ChunkIds   []string `json:"chunkIds"`
+	Id           string          `json:"id"`
+	DataNodeId   string          `json:"data_node_id"`
+	ChunkIds     []string        `json:"chunkIds"`
+	IOLoad       int64           `json:"io_load"`
+	SuccessInfos []ChunkSendInfo `json:"success_infos"`
+	FailInfos    []ChunkSendInfo `json:"fail_infos"`
 }
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
-	logrus.Infof("heartbeat, id: %s", o.DataNodeId)
-	if dataNode := GetDataNode(o.DataNodeId); dataNode != nil {
-		dataNode.HeartbeatTime = time.Now()
-		return nil, nil
+	logrus.Infof("Heartbeat, id: %s", o.DataNodeId)
+	nextChunkInfos, ok := UpdateDataNode4Heartbeat(o)
+	if !ok {
+		return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
 	}
-	return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
+	UpdateChunk4Heartbeat(o)
+	return nextChunkInfos, nil
 }
 
 type AddOperation struct {
-	Id         string `json:"id"`
-	Path       string `json:"path"`
-	FileName   string `json:"file_name"`
-	Size       int64  `json:"size"`
-	FileNodeId string `json:"file_node_id"`
-	ChunkIndex int32  `json:"chunk_index"`
-	ChunkId    string `json:"chunk_id"`
-	Stage      int    `json:"stage"`
+	Id           string                 `json:"id"`
+	Path         string                 `json:"path"`
+	FileName     string                 `json:"file_name"`
+	Size         int64                  `json:"size"`
+	FileNodeId   string                 `json:"file_node_id"`
+	ChunkNum     int32                  `json:"chunk_num"`
+	ChunkId      string                 `json:"chunk_id"`
+	Infos        []util.ChunkSendResult `json:"infos"`
+	FailChunkIds []string               `json:"fail_chunk_ids"`
+	Stage        int                    `json:"stage"`
 }
 
 func (o AddOperation) Apply() (interface{}, error) {
@@ -111,35 +122,49 @@ func (o AddOperation) Apply() (interface{}, error) {
 		}
 		return rep, nil
 	case common.GetDataNodes:
-		chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.Itoa(int(o.ChunkIndex))
-		dataNodes, primaryNode := AllocateDataNodes()
-		var (
-			dataNodeIds   = make([]string, len(dataNodes))
-			dataNodeAddrs = make([]string, len(dataNodes))
-		)
-		for i, node := range dataNodes {
-			node.Chunks.Add(chunkId)
-			dataNodeIds[i] = node.Id
-			dataNodeAddrs[i] = node.Address
+		dataNodes := BatchAllocateDataNodes(int(o.ChunkNum))
+		chunks := make([]*Chunk, o.ChunkNum)
+		dataNodeIds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
+		dataNodeAdds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
+		for i := 0; i < int(o.ChunkNum); i++ {
+			chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.Itoa(i)
+			var (
+				dataNodeIdSet = set.NewSet()
+				dnIds         = make([]string, len(dataNodes[0]))
+				dnAdds        = make([]string, len(dataNodes[0]))
+			)
+			for i, node := range dataNodes[i] {
+				dataNodeIdSet.Add(node.Id)
+				dnIds[i] = node.Id
+				dnAdds[i] = node.Address
+			}
+			chunk := &Chunk{
+				Id:               chunkId,
+				dataNodes:        set.NewSet(),
+				pendingDataNodes: dataNodeIdSet,
+			}
+			logrus.Debugf("Chunk index: %v, dnIds: %v, dnAdds: %v", i, dnIds, dnAdds)
+			chunks[i] = chunk
+			dataNodeIds[i] = &pb.GetDataNodes4AddReply_Array{
+				Items: dnIds,
+			}
+			dataNodeAdds[i] = &pb.GetDataNodes4AddReply_Array{
+				Items: dnAdds,
+			}
 		}
-		primaryNode.Leases.Add(chunkId)
-
-		chunk := &Chunk{
-			Id:          chunkId,
-			dataNodes:   dataNodeIds,
-			primaryNode: primaryNode.Id,
-		}
-		AddChunk(chunk)
+		BatchAddChunk(chunks)
 		rep := &pb.GetDataNodes4AddReply{
-			DataNodes:   dataNodeAddrs,
-			PrimaryNode: primaryNode.Address,
+			DataNodeIds:  dataNodeIds,
+			DataNodeAdds: dataNodeAdds,
 		}
 		return rep, nil
-	case common.ReleaseLease:
-		chunk := GetChunk(o.ChunkId)
-		err := ReleaseLease(chunk.primaryNode, o.ChunkId)
-		return nil, err
 	case common.UnlockDic:
+		if o.FailChunkIds != nil {
+			_, _ = EraseFileNode(o.Path)
+			BatchClearPendingDataNodes(o.FailChunkIds)
+		}
+		BatchUpdatePendingDataNodes(o.Infos)
+		BatchAddChunks(o.Infos)
 		err := UnlockFileNodesById(o.FileNodeId, false)
 		return nil, err
 	default:
@@ -164,23 +189,13 @@ func (o GetOperation) Apply() (interface{}, error) {
 	case common.GetDataNodes:
 		chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.FormatInt(int64(o.ChunkIndex), 10)
 		chunk := GetChunk(chunkId)
-		dataNodeIds := make([]string, len(chunk.dataNodes))
-		dataNodeAddrs := make([]string, len(chunk.dataNodes))
-		for i, nodeId := range chunk.dataNodes {
-			dataNode := GetDataNode(nodeId)
-			dataNodeIds[i] = dataNode.Id
-			dataNodeAddrs[i] = dataNode.Address
-		}
+		dataNodeIds, dataNodeAddrs := GetSortedDataNodeIds(chunk.dataNodes)
 		rep := &pb.GetDataNodes4GetReply{
 			DataNodeIds:   dataNodeIds,
 			DataNodeAddrs: dataNodeAddrs,
 			ChunkIndex:    o.ChunkIndex,
 		}
 		return rep, nil
-	case common.ReleaseLease:
-		chunk := GetChunk(o.ChunkId)
-		err := ReleaseLease(chunk.primaryNode, o.ChunkId)
-		return nil, err
 	default:
 		return nil, nil
 	}
@@ -193,7 +208,6 @@ type MkdirOperation struct {
 }
 
 func (o MkdirOperation) Apply() (interface{}, error) {
-	logrus.Infof("mkdir, path: %s, filename: %s", o.Path, o.FileName)
 	return AddFileNode(o.Path, o.FileName, common.DirSize, false)
 }
 
@@ -204,7 +218,6 @@ type MoveOperation struct {
 }
 
 func (o MoveOperation) Apply() (interface{}, error) {
-	logrus.Infof("move, SourcePath: %s, TargetPath: %s", o.SourcePath, o.TargetPath)
 	return MoveFileNode(o.SourcePath, o.TargetPath)
 }
 
@@ -214,7 +227,6 @@ type RemoveOperation struct {
 }
 
 func (o RemoveOperation) Apply() (interface{}, error) {
-	logrus.Infof("remove, path: %s", o.Path)
 	return RemoveFileNode(o.Path)
 }
 
@@ -224,7 +236,6 @@ type ListOperation struct {
 }
 
 func (o ListOperation) Apply() (interface{}, error) {
-	logrus.Infof("list, path: %s", o.Path)
 	fileNodes, err := ListFileNode(o.Path)
 	return fileNode2FileInfo(fileNodes), err
 }
@@ -235,7 +246,6 @@ type StatOperation struct {
 }
 
 func (o StatOperation) Apply() (interface{}, error) {
-	logrus.Infof("stat, path: %s", o.Path)
 	return StatFileNode(o.Path)
 }
 
@@ -246,7 +256,6 @@ type RenameOperation struct {
 }
 
 func (o RenameOperation) Apply() (interface{}, error) {
-	logrus.Infof("rename, path: %s, newName: %s", o.Path, o.NewName)
 	return RenameFileNode(o.Path, o.NewName)
 }
 
@@ -260,4 +269,32 @@ func fileNode2FileInfo(nodes []*FileNode) []*pb.FileInfo {
 		}
 	}
 	return files
+}
+
+type DegradeOperation struct {
+	Id         string `json:"id"`
+	DataNodeId string `json:"dataNodeId"`
+	Stage      int    `json:"stage"`
+}
+
+func (o DegradeOperation) Apply() (interface{}, error) {
+	DegradeDataNode(o.DataNodeId, o.Stage)
+	return nil, nil
+}
+
+type AllocateChunksOperation struct {
+	Id           string   `json:"id"`
+	SenderPlan   []int    `json:"sender_plan"`
+	ReceiverPlan []int    `json:"receiver_plan"`
+	ChunkIds     []string `json:"chunk_ids"`
+	DataNodeIds  []string `json:"data_node_ids"`
+	BatchLen     int      `json:"batch_len"`
+}
+
+func (o AllocateChunksOperation) Apply() (interface{}, error) {
+	ApplyAllocatePlan(o.SenderPlan, o.ReceiverPlan, o.ChunkIds, o.DataNodeIds, o.BatchLen)
+	return nil, nil
+}
+
+type ExpandOperation struct {
 }

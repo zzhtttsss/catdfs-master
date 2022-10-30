@@ -12,6 +12,7 @@ require (
 	github.com/spf13/viper v1.12.0
 	github.com/stretchr/testify v1.7.1
 	go.etcd.io/etcd/client/v3 v3.5.4
+	go.uber.org/atomic v1.7.0
 	google.golang.org/grpc v1.48.0
 	tinydfs-base v0.0.0-00010101000000-000000000000
 )
@@ -51,7 +52,6 @@ require (
 	github.com/subosito/gotenv v1.3.0 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.4 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.4 // indirect
-	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.17.0 // indirect
 	golang.org/x/net v0.0.0-20220812174116-3211cb980234 // indirect
@@ -64,6 +64,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.0 // indirect
 )
 
-replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20221011113516-8e60d118fdc9
+replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20221029024750-675fb1ec9a98
 
 //replace tinydfs-base => ../tinydfs-base

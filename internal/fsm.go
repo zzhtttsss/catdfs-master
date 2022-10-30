@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"github.com/hashicorp/raft"
+	"github.com/sirupsen/logrus"
 	"io"
 	"reflect"
 )
@@ -65,6 +66,10 @@ func (ms MasterFSM) Restore(r io.ReadCloser) error {
 	if err != nil {
 		return err
 	}
+	err = RestorePendingChunkQueue(buf)
+	if err != nil {
+		return err
+	}
 	return r.Close()
 }
 
@@ -73,16 +78,25 @@ type snapshot struct {
 
 // Persist Take a snapshot of current metadata and save it as a file.
 func (s *snapshot) Persist(sink raft.SnapshotSink) error {
+	logrus.Infof("Start to persist a snapshot.")
 	err := PersistDirTree(sink)
 	if err != nil {
+		logrus.Errorf("Fail to persist directory tree, error detail: %s", err.Error())
 		return err
 	}
 	err = PersistDataNodes(sink)
 	if err != nil {
+		logrus.Errorf("Fail to persist datanodes, error detail: %s", err.Error())
 		return err
 	}
 	err = PersistChunks(sink)
 	if err != nil {
+		logrus.Errorf("Fail to persist chunks, error detail: %s", err.Error())
+		return err
+	}
+	err = PersistPendingChunkQueue(sink)
+	if err != nil {
+		logrus.Errorf("Fail to persist pending chunk queue, error detail: %s", err.Error())
 		return err
 	}
 	return sink.Close()

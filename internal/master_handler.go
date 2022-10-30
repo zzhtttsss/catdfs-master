@@ -291,6 +291,7 @@ func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 				handler.FollowerStateObserver = getFollowerStateObserver()
 				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
 				go MonitorHeartbeat(subContext)
+				go MonitorPendingChunk(subContext)
 				logrus.Infof("Become leader, success to change etcd leader infomation and monitor datanodes")
 			} else {
 				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
@@ -359,10 +360,15 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 // maintain the connection between chunkserver and master.
 func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
 	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
+	successInfos := convChunkInfo(args.SuccessChunkInfos)
+	failInfos := convChunkInfo(args.FailChunkInfos)
 	operation := &HeartbeatOperation{
-		Id:         util.GenerateUUIDString(),
-		DataNodeId: args.Id,
-		ChunkIds:   args.ChunkId,
+		Id:           util.GenerateUUIDString(),
+		DataNodeId:   args.Id,
+		ChunkIds:     args.ChunkId,
+		IOLoad:       args.IOLoad,
+		SuccessInfos: successInfos,
+		FailInfos:    failInfos,
 	}
 	data := getData4Apply(operation, common.OperationHeartbeat)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
@@ -372,7 +378,6 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 			Code: common.MasterHeartbeatFailed,
 			Msg:  err.Error(),
 		})
-		csCountMonitor.Dec()
 		return nil, details.Err()
 	}
 	response := (applyFuture.Response()).(*ApplyResponse)
@@ -384,9 +389,36 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		})
 		return nil, details.Err()
 	}
+	chunkSendInfos := (response.Response).([]ChunkSendInfo)
+	nextChunkInfos := deConvChunkInfo(chunkSendInfos)
+	dataNodeAddress := GetDataNodeAddresses(chunkSendInfos)
+	heartbeatReply := &pb.HeartbeatReply{
+		DataNodeAddress: dataNodeAddress,
+		ChunkInfos:      nextChunkInfos,
+	}
+	return heartbeatReply, nil
+}
 
-	rep := &pb.HeartbeatReply{}
-	return rep, nil
+func convChunkInfo(chunkInfos []*pb.ChunkInfo) []ChunkSendInfo {
+	chunkSendInfos := make([]ChunkSendInfo, len(chunkInfos))
+	for i := 0; i < len(chunkInfos); i++ {
+		chunkSendInfos[i] = ChunkSendInfo{
+			ChunkId:    chunkInfos[i].ChunkId,
+			DataNodeId: chunkInfos[i].DataNodeId,
+		}
+	}
+	return chunkSendInfos
+}
+
+func deConvChunkInfo(chunkSendInfos []ChunkSendInfo) []*pb.ChunkInfo {
+	chunkInfos := make([]*pb.ChunkInfo, len(chunkSendInfos))
+	for i := 0; i < len(chunkInfos); i++ {
+		chunkInfos[i] = &pb.ChunkInfo{
+			ChunkId:    chunkSendInfos[i].ChunkId,
+			DataNodeId: chunkSendInfos[i].DataNodeId,
+		}
+	}
+	return chunkInfos
 }
 
 // CheckArgs4Add is called by client. It check whether the path and file name
@@ -465,14 +497,13 @@ func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAnd
 	return rep, nil
 }
 
-// GetDataNodes4Add is called by client. It allocates some DataNode to store a Chunk
-// and selects the primary DataNode.
+// GetDataNodes4Add is called by client. It allocates DataNode for a batch of Chunk.
 func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.GetDataNodes4AddArgs) (*pb.GetDataNodes4AddReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for getting dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
+	logrus.WithContext(ctx).Infof("Get request for getting dataNodes for single chunk from client, FileNodeId: %s, ChunkNum: %d", args.FileNodeId, args.ChunkNum)
 	operation := &AddOperation{
 		Id:         util.GenerateUUIDString(),
 		FileNodeId: args.FileNodeId,
-		ChunkIndex: args.ChunkIndex,
+		ChunkNum:   args.ChunkNum,
 		Stage:      common.GetDataNodes,
 	}
 	data := getData4Apply(operation, common.OperationAdd)
@@ -494,11 +525,11 @@ func (handler *MasterHandler) GetDataNodes4Add(ctx context.Context, args *pb.Get
 		})
 		return nil, details.Err()
 	}
-	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk from client, FileNodeId: %s, ChunkIndex: %d", args.FileNodeId, args.ChunkIndex)
+	logrus.WithContext(ctx).Infof("Success to get dataNodes for single chunk from client, FileNodeId: %s, ChunkNum: %d", args.FileNodeId, args.ChunkNum)
 	return (response.Response).(*pb.GetDataNodes4AddReply), nil
 }
 
-// GetDataNodes4Get is called by client. It finds the dataNodes for the specified chunkId.
+// GetDataNodes4Get is called by client. It finds the dataNodes for the specified ChunkId.
 func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.GetDataNodes4GetArgs) (*pb.GetDataNodes4GetReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for getting data node, FileNodeId: %s", args.FileNodeId)
 	operation := &GetOperation{
@@ -530,83 +561,26 @@ func (handler *MasterHandler) GetDataNodes4Get(ctx context.Context, args *pb.Get
 	return (response.Response).(*pb.GetDataNodes4GetReply), nil
 }
 
-// ReleaseLease4Add is called by client. It releases the lease of a chunk.
-func (handler *MasterHandler) ReleaseLease4Add(ctx context.Context, args *pb.ReleaseLease4AddArgs) (*pb.ReleaseLease4AddReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
-	operation := &AddOperation{
-		Id:      util.GenerateUUIDString(),
-		ChunkId: args.ChunkId,
-		Stage:   common.ReleaseLease,
-	}
-	data := getData4Apply(operation, common.OperationAdd)
-	applyFuture := handler.Raft.Apply(data, 5*time.Second)
-	if err := applyFuture.Error(); err != nil {
-		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4AddFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterReleaseLease4AddFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-	response := (applyFuture.Response()).(*ApplyResponse)
-	if err := response.Error; err != nil {
-		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4AddFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterReleaseLease4AddFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-
-	rep := &pb.ReleaseLease4AddReply{}
-	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
-	return rep, nil
-
-}
-
-// ReleaseLease4Get is called by client. It releases the lease of a chunk.
-func (handler *MasterHandler) ReleaseLease4Get(ctx context.Context, args *pb.ReleaseLease4GetArgs) (*pb.ReleaseLease4GetReply, error) {
-	logrus.WithContext(ctx).Infof("Get request for releasing the lease of a chunk from client, chunkId: %s", args.ChunkId)
-	operation := &GetOperation{
-		Id:      util.GenerateUUIDString(),
-		ChunkId: args.ChunkId,
-		Stage:   common.ReleaseLease,
-	}
-	data := getData4Apply(operation, common.OperationGet)
-	applyFuture := handler.Raft.Apply(data, 5*time.Second)
-	if err := applyFuture.Error(); err != nil {
-		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4GetFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterReleaseLease4GetFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-	response := (applyFuture.Response()).(*ApplyResponse)
-	if err := response.Error; err != nil {
-		logrus.Errorf("Fail to release the lease of a chunk, error code: %v, error detail: %s,", common.MasterReleaseLease4GetFailed, err.Error())
-		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
-			Code: common.MasterReleaseLease4GetFailed,
-			Msg:  err.Error(),
-		})
-		return nil, details.Err()
-	}
-
-	rep := &pb.ReleaseLease4GetReply{}
-	logrus.WithContext(ctx).Infof("Success to release the lease of a chunk, chunkId: %s", args.ChunkId)
-	SuccessCountInc(handler.SelfAddr, common.OperationGet)
-	return rep, nil
-}
-
 // UnlockDic4Add is called by client. It unlocks all FileNode in the target path
-// which is used to add file.
+// which is used to add file and handle the result of the add operation.
 func (handler *MasterHandler) UnlockDic4Add(ctx context.Context, args *pb.UnlockDic4AddArgs) (*pb.UnlockDic4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for unlocking FileNodes in the target path from client, FileNodeId: %s", args.FileNodeId)
 	operation := &AddOperation{
-		Id:         util.GenerateUUIDString(),
-		FileNodeId: args.FileNodeId,
-		Stage:      common.UnlockDic,
+		Id:           util.GenerateUUIDString(),
+		FileNodeId:   args.FileNodeId,
+		FailChunkIds: args.FailChunkIds,
+		Path:         args.FilePath,
+		Stage:        common.UnlockDic,
 	}
+	infos := make([]util.ChunkSendResult, len(args.Infos))
+	for i, info := range args.Infos {
+		infos[i] = util.ChunkSendResult{
+			ChunkId:          info.ChunkId,
+			SuccessDataNodes: info.SuccessNode,
+			FailDataNodes:    info.FailNode,
+		}
+	}
+	operation.Infos = infos
 	data := getData4Apply(operation, common.OperationAdd)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
 	if err := applyFuture.Error(); err != nil {

@@ -32,7 +32,8 @@ const (
 const (
 	rootFileName     = ""
 	pathSplitString  = "/"
-	deleteFilePrefix = "delete"
+	deleteFilePrefix = "delete_"
+	deleteDelimiter  = "_"
 )
 
 var (
@@ -263,6 +264,17 @@ func MoveFileNode(currentPath string, targetPath string) (*FileNode, error) {
 // and update isDel and delTime of the FileNode. The delete state will be
 // canceled when the user renames the FileNode within a certain period of time.
 func RemoveFileNode(path string) (*FileNode, error) {
+	return removeFileNode(path, true)
+}
+
+// EraseFileNode will completely delete a FileNode. It is only used internally.
+// It will set the delTime of a FileNode to one year ago, so the monitor goroutine
+// will completely delete the FileNode
+func EraseFileNode(path string) (*FileNode, error) {
+	return removeFileNode(path, false)
+}
+
+func removeFileNode(path string, isDummy bool) (*FileNode, error) {
 	fileNode, stack, isExist := getAndLockByPath(path, false)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
@@ -270,11 +282,14 @@ func RemoveFileNode(path string) (*FileNode, error) {
 	defer unlockAllMutex(stack, false)
 
 	delete(fileNode.ParentNode.ChildNodes, fileNode.FileName)
-	fileNode.FileName = deleteFilePrefix + fileNode.FileName
+	fileNode.FileName = deleteFilePrefix + fileNode.Id + deleteDelimiter + fileNode.FileName
 	fileNode.ParentNode.ChildNodes[fileNode.FileName] = fileNode
 
 	fileNode.IsDel = true
 	delTime := time.Now()
+	if !isDummy {
+		delTime = delTime.AddDate(-1, 0, 0)
+	}
 	fileNode.DelTime = &(delTime)
 	return fileNode, nil
 }
