@@ -65,19 +65,13 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 		newSet.Add(id)
 	}
 	datanode := &DataNode{
-		Id:            o.DataNodeId,
-		status:        common.Cold,
-		Address:       o.Address,
-		Chunks:        newSet,
-		IOLoad:        0,
-		HeartbeatTime: time.Now(),
 		Id:               o.DataNodeId,
 		status:           common.Cold,
 		Address:          o.Address,
 		Chunks:           newSet,
-		FutureSendChunks: make(map[ChunkSendInfo]int),
 		IOLoad:           0,
 		HeartbeatTime:    time.Now(),
+		FutureSendChunks: make(map[ChunkSendInfo]int),
 	}
 	AddDataNode(datanode)
 	logrus.Infof("[Id=%s] Connected", o.DataNodeId)
