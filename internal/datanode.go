@@ -191,7 +191,9 @@ func UpdateDataNode4Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 		return nil, false
 	}
 	dataNode.HeartbeatTime = time.Now()
-	dataNode.status = common.Alive
+	if o.IsReady {
+		dataNode.status = common.Alive
+	}
 	dataNode.IOLoad = int(o.IOLoad)
 	for _, info := range o.SuccessInfos {
 		delete(dataNode.FutureSendChunks, info)
@@ -216,9 +218,13 @@ func GetSortedDataNodeIds(set set.Set) ([]string, []string) {
 	defer updateMapLock.RUnlock()
 	setChan := set.Iter()
 
-	dns := make([]*DataNode, 0, set.Cardinality())
+	dns := make([]*DataNode, 0)
 	for id := range setChan {
-		dns = append(dns, dataNodeMap[id.(string)])
+		if node, ok := dataNodeMap[id.(string)]; ok {
+			if node.status == common.Alive {
+				dns = append(dns, dataNodeMap[id.(string)])
+			}
+		}
 	}
 	sort.SliceStable(dns, func(i, j int) bool {
 		if dns[i].IOLoad < dns[j].IOLoad {

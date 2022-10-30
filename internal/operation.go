@@ -66,18 +66,12 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 	}
 	datanode := &DataNode{
 		Id:               o.DataNodeId,
-		status:           common.Alive,
+		status:           common.Cold,
 		Address:          o.Address,
-		Chunks:           set.NewSet(),
+		Chunks:           newSet,
 		FutureSendChunks: make(map[ChunkSendInfo]int),
 		IOLoad:           0,
 		HeartbeatTime:    time.Now(),
-		Id:            o.DataNodeId,
-		status:        common.Cold,
-		Address:       o.Address,
-		Chunks:        newSet,
-		IOLoad:        0,
-		HeartbeatTime: time.Now(),
 	}
 
 	AddDataNode(datanode)
@@ -92,6 +86,7 @@ type HeartbeatOperation struct {
 	IOLoad       int64           `json:"io_load"`
 	SuccessInfos []ChunkSendInfo `json:"success_infos"`
 	FailInfos    []ChunkSendInfo `json:"fail_infos"`
+	IsReady      bool            `json:"is_ready"`
 }
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
