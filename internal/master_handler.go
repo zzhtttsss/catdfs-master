@@ -360,7 +360,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	id := response.Response.(string)
 	rep := &pb.DNRegisterReply{
 		Id:           id,
-		PendingCount: uint32(pendingCount),
+		PendingCount: uint32(pendingCount + len(args.ChunkIds)),
 	}
 	logrus.WithContext(ctx).Infof("Success to register a datanode from chunkserver, address: %s, id: %s", address, id)
 	csCountMonitor.Inc()
@@ -425,6 +425,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		IOLoad:       args.IOLoad,
 		SuccessInfos: successInfos,
 		FailInfos:    failInfos,
+		IsReady:      args.IsReady,
 	}
 	data := getData4Apply(operation, common.OperationHeartbeat)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
