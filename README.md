@@ -53,9 +53,9 @@ docker compose -f [compose.yaml] up -d
 ```
 
 ## 设计
-![](/Users/zzh/Documents/projects/tinydfs/metadata.png)
+![](./document/metadata.png)
 
-![](/Users/zzh/Documents/projects/tinydfs/shrink.png)
+![](./document/shrink.png)
 
 ## 效果展示
 
