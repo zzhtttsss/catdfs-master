@@ -1,9 +1,9 @@
-# TinyDFS
+# CatDFS
 
 CatDFS是一个使用Golang实现轻量级的开源分布式文件系统。它参考了[《The Google File System》](https://github.com/XutongLi/Learning-Notes/blob/master/Distributed_System/Paper_Reading/GFS/The%20Google%20File%20System.pdf)
 以及[HDFS](https://github.com/apache/hadoop)，并在其基础上进行了改进与取舍。
 
-
+<img src="./document/architecture.png" width="750" title="Architecture of CatDFS"/>
 
 ## 介绍
 此项目包含四个子项目，分别为：
@@ -39,6 +39,17 @@ CatDFS主要由两个硕士(同时也是菜鸟软件工程师)[@zzhtttsss](https
 这个项目使用 `Golang` 开发，为了模拟分布式环境，使用 `Docker` 进行测试。在`Docker compose`中，我们部署了`3`个`master`、
 `5`个`chunkserver`，`Ectd`作为服务注册和发现的组件，`Cadvisor`+`Prometheus`+`Grafana`作为可视化监控的组件。
 
+## 设计
+
+<img src="./document/architecture.png" width="750" title="Architecture of CatDFS"/>
+
+<img src="./document/metadata.png" width="750"/>
+
+<img src="./document/shrink.png" width="750"/>
+
+
+## 效果展示
+
 ## 安装
 
 1. 将各个模块编译为`docker`镜像，在各个模块的目录下：
@@ -51,15 +62,6 @@ docker build -t [name] .
 ```bash
 docker compose -f [compose.yaml] up -d
 ```
-
-## 设计
-![](./document/metadata.png)
-
-![](./document/shrink.png)
-
-## 效果展示
-
-## 性能测试
 
 
 ## 维护者
