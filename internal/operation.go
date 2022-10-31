@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
@@ -330,5 +331,52 @@ func (e ExpandOperation) Apply() (interface{}, error) {
 		}
 	}
 	updateChunksLock.Unlock()
+	return nil, nil
+}
+
+type TreeCheckOperation struct {
+	Id string `json:"id"`
+}
+
+func (t TreeCheckOperation) Apply() (interface{}, error) {
+	queue := util.NewQueue[*FileNode]()
+	queue.Push(root)
+	for queue.Len() != 0 {
+		cur := queue.Pop()
+		if cur.IsDel && time.Now().Sub(*cur.DelTime).Hours() > 23 {
+			fileNodeIdSet.Remove(cur.Id)
+			if cur.ParentNode != nil {
+				delete(cur.ParentNode.ChildNodes, cur.FileName)
+				continue
+			}
+		}
+		if cur.ChildNodes != nil && len(cur.ChildNodes) != 0 {
+			for _, node := range cur.ChildNodes {
+				queue.Push(node)
+			}
+		}
+	}
+	return nil, nil
+}
+
+type DataCheckOperation struct {
+	Id string `json:"id"`
+}
+
+func (d DataCheckOperation) Apply() (interface{}, error) {
+	for _, node := range dataNodeMap {
+		for chunkId := range node.Chunks.Iter() {
+			fileNodeId := strings.Split(chunkId.(string), common.ChunkIdDelimiter)[0]
+			if !fileNodeIdSet.Contains(fileNodeId) {
+				node.Chunks.Remove(chunkId)
+			}
+		}
+	}
+	for id := range chunksMap {
+		fileNodeId := strings.Split(id, common.ChunkIdDelimiter)[0]
+		if !fileNodeIdSet.Contains(fileNodeId) {
+			delete(chunksMap, id)
+		}
+	}
 	return nil, nil
 }

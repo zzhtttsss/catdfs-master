@@ -293,6 +293,8 @@ func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
 				go MonitorHeartbeat(subContext)
 				go MonitorPendingChunk(subContext)
+				go CleanupRubbish(subContext)
+				go DirectoryCheck(subContext)
 				logrus.Infof("Become leader, success to change etcd leader infomation and monitor datanodes")
 			} else {
 				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)

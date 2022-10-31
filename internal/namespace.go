@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"container/list"
 	"fmt"
+	mapset "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
 	"github.com/sirupsen/logrus"
 	"math"
@@ -52,6 +53,8 @@ var (
 	// being operated is used as the key.
 	lockedFileNodes  = make(map[string]*list.List)
 	fileNodesMapLock = &sync.Mutex{}
+	// fileNodeIdSet includes all fileNode id stored in the root.
+	fileNodeIdSet = mapset.NewSet()
 )
 
 // FileNode represents a file or directory in the file system.
@@ -187,7 +190,9 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 		LastLockTime:   time.Now(),
 	}
 	if isFile {
+		fileNodeIdSet.Add(newNode.Id)
 		newNode.Chunks = initChunks(size, id)
+
 	} else {
 		newNode.ChildNodes = make(map[string]*FileNode)
 	}
@@ -468,6 +473,9 @@ func ReadDirTree(buf *bufio.Scanner) map[string]*FileNode {
 			delTimePtr = &delTime
 		}
 		isDel, _ := strconv.ParseBool(data[isDelIdx])
+		if isDel && time.Now().Sub(delTime).Hours() > 23 {
+			continue
+		}
 		lastLockTime, _ := time.Parse(common.LogFileTimeFormat, data[lastLockTimeIdx])
 		fn := &FileNode{
 			Id:       data[FileNodeIdIdx],
@@ -519,6 +527,9 @@ func buildTree(cur *FileNode, nodeMap map[string]*FileNode) {
 		delete(cur.ChildNodes, id)
 		cur.ChildNodes[node.FileName] = node
 		node.ParentNode = cur
+		if node.IsFile {
+			fileNodeIdSet.Add(node.Id)
+		}
 		buildTree(node, nodeMap)
 	}
 }
