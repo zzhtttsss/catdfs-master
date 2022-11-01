@@ -28,27 +28,7 @@ CatDFS是一个使用Golang实现轻量级的开源分布式文件系统。它�
 - 清晰的设计思路——提供完整的设计文档，包含了各个元数据和机制的设计，便于快速掌握系统的设计原理。
 - 详细的代码注释——绝大多数函数和属性都有较为详尽的英文注释，帮助理解各个函数和变量的作用。
 
-<!-- TOC -->
-* [CatDFS](#catdfs)
-  * [背景](#)
-  * [设计](#)
-    * [整体架构](#)
-      * [Master](#master)
-      * [Chunkserver](#chunkserver)
-      * [Client](#client)
-    * [元数据](#)
-      * [Chunk元数据](#chunk)
-      * [DataNode元数据](#datanode)
-      * [文件树](#)
-    * [高可用性](#)
-    * [文件传输](#)
-    * [缩容](#)
-    * [扩容](#)
-  * [效果示例](#)
-  * [安装](#)
-  * [维护者](#)
-  * [使用许可](#)
-<!-- TOC -->
+
 
 ## 背景
 
@@ -72,6 +52,8 @@ docker build -t [name] .
 ```bash
 docker compose -f [compose.yaml] up -d
 ```
+
+## 示例
 
 ## 设计
 
@@ -127,25 +109,95 @@ DataNode元数据中主要包括dataNodeMap和dataNodeHeap。dataNodeMap包含�
 
 ### 高可用性
 
-CatDFS的Master节点高可用性主要采用由Raft共识算法保证元数据一致性的Master多节点方案（基于[hashicorp/raft](https://github.com/hashicorp/raft)实现）。
+CatDFS的Master节点高可用性主要采用由Raft共识算法保证元数据一致性的Master多节点方案（基于[hashicorp/raft](https://github.com/hashicorp/raft)实现），
+并借助Etcd来进行服务注册和发现。
+
+#### Leader切换
+
+当Leader节点崩溃或是出现网络故障一定时间没有和集群其他节点保持联系后，Master集群会重新选举出的Leader节点并进行Leader切换。
+
+新Leader节点将会：
+* 将自身的地址写入到Etcd相应的key中来替换原Leader节点的地址。
+* 注册一个Observer监控Follower节点状态变化事件，以便在Follower节点死亡后及时将其移出集群。
+* 在一个协程中监控Chunkserver心跳
+* 在一个协程中消费pendingChunkQueue
+
+旧Leader节点将会：
+* 注销监控Follower节点状态变化事件的Observer。
+* 取消监控Chunkserver心跳的协程和消费pendingChunkQueue的协程的context以停止这两个协程。
+* 将自身的地址写入到Etcd的Follower目录下。
 
 
+#### 元数据持久化
+
+CatDFS的元数据持久化利用了[hashicorp/raft](https://github.com/hashicorp/raft)的持久化机制。具体而言，
+每个Master节点都会存储当前所有的日志信息（Log），集群信息并定期保存快照（Snapshot）。其中Log中包含对元数据的更改，集群信息包含当前集群的节点状态，
+Snapshot包含所有的元数据信息。
+
+#### 崩溃恢复
+
+在一个Master节点崩溃后，其会被Leader节点从Raft集群和Etcd中删除。如果该节点是Leader节点，则会选举出新的Leader节点完成以上操作。
+
+当Master节点恢复重启后，它将先读取Snapshot然后重新执行该Snapshot后的每一条Log信息来还原元数据。之后它将重新加入Raft集群并在Etcd中重新注册它的信息，
+并从Leader节点获取到Log信息来将元数据变为最新状态。完成以上步骤，Master节点即可重新对外提供服务。
+
+#### 读写分离
+
+读写分离即从Leader节点写元数据，从Follower节点读取元数据。对于读取元数据的操作，如List和Stat，我们提供了两种模式，
+一种是从Leader节点读取元数据（Latest），这种模式可以保证读到的是最新数据；另一种是从Follower节点随机选取一个节点读取元数据（Stale），
+这种模式下元数据存在50ms左右的延迟。用户可以在命令中添加参数来设置该命令采用哪种模式。
 
 ### 文件传输
 
+文件传输主要采用管道（Pipeline）机制，该机制会将Client和多个Chunkserver之间建立管道，数据会从一端发送到管道上的每一个节点。
 
+#### 采用GRPC Stream传输
+
+因为一个Chunk大小为64mb，GRPC常规传输不适合这种大文件，所以采用这种流式传输，其会将整个chunk分为多次传输，这里称每次传输的为一个piece
+（另外因为其他服务间通信都使用了GRPC，所以也没有再去使用tcp，http或是其他方式传输文件）
+
+#### 接受转发和IO分离
+
+因为IO非常缓慢，主线程进行频繁的IO会很影响pipline的传输效率，所以采用协程加管道的方式使得Chunkserver在协程中将接收到的piece写入到硬盘中，
+而主线程只负责接收piece，放入管道传给协程以及将piece转发给下一个Chunkserver
+
+#### 递归完成数据传输
+
+当一个Chunkserver A被client或其他Chunkserver通过rpc调用transferChunk方法时，其会从Stream传递来的metadata中得到当前剩下的需要传输
+的Chunkserver的切片，并取第一个Chunkserver B通过rpc调用B的transferChunk方法得到一个传输连接。
+
+假设当前有client需要向Chunkserver A和Chunkserver B，Chunkserver C传输一个Chunk，这种设计可以使client在通过rpc调用A的transferChunk
+方法建立一个stream连接来传输chunk时，A会同样通过调用B的transferChunk方法建立一个Stream连接，B会同样通过调用C的
+transferChunk方法建立一个Stream连接，这样整个pipline就建立起来了，在client向A传输一个piece时，A会立即使用持有的
+B的stream连接将piece转发给B，B收到后同理转发给C。
+
+<img src="./document/transfer.png" width="750"/>
+
+#### 错误处理
+
+一个管道中的每一个Chunkserver都可能出现两种错误：文件写入错误或是数据传输错误。文件写入错误只会影响到单个节点，
+而数据传输错误会影响到发生错误的节点及其后续的所有节点。为了得到所有存储Chunk失败的节点来让Master在之后能弥补缺失的副本，
+每个Chunkserver在传输完成后都会返回一个错误列表给管道中的前一个节点。该列表包含该节点及该节点之后所有节点中传输失败的节点地址，
+该列表的维护机制如下：
+* 当节点发生文件写入错误时，便将自己的地址加入到列表中。
+* 当节点向下一个节点发送数据出错时，将该节点之后的所有节点地址都加入到列表中。
+* 当节点接收数据出错时，直接停止接收和发送数据。
+* 节点在接收到下一个节点返回的错误列表后，会将当前自己的列表与该列表合并。
+
+通过该机制，管道的第一个节点也就是发送方能够获取到管道中所有存储Chunk失败的节点并统计数量将其返回给Master。
+Master会将向pendingChunkQueue中加入此数量的该Chunk，并在之后通过消费pendingChunkQueue来补齐该Chunk的副本。
+
+<img src="./document/transferError.png" width="750"/>
 
 ### 缩容
 
-
+Master在一定时间没有收到某个Chunkserver的心跳后会判定该Chunkserver死亡，触发缩容。具体流程如图所示（图片较大以至于Github不能很好的显示，
+建议下载查看）：
 
 <img src="./document/shrink.png" width="750"/>
 
 ### 扩容
 
-
-
-## 示例
 
 
 
