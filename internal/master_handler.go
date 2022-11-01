@@ -421,7 +421,7 @@ func deConvChunkInfo(chunkSendInfos []ChunkSendInfo) []*pb.ChunkInfo {
 	return chunkInfos
 }
 
-// CheckArgs4Add is called by client. It check whether the path and file name
+// CheckArgs4Add is called by client. It checks whether the path and file name
 // entered by the user in the Add operation are legal.
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for check add args from client, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
@@ -716,12 +716,32 @@ func (handler *MasterHandler) CheckAndRemove(ctx context.Context, args *pb.Check
 // CheckAndList is called by client. It checks args and list the specified directory.
 func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAndListArgs) (*pb.CheckAndListReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and list the specified directory, path: %s", args.Path)
+	var (
+		response interface{}
+		err      error
+	)
 	RequestCountInc(handler.SelfAddr, common.OperationList)
 	operation := &ListOperation{
 		Id:   util.GenerateUUIDString(),
 		Path: args.Path,
 	}
-	response, err := operation.Apply()
+	if args.IsLatest {
+		data := getData4Apply(operation, common.OperationList)
+		applyFuture := handler.Raft.Apply(data, 5*time.Second)
+		if err := applyFuture.Error(); err != nil {
+			logrus.Errorf("Fail to check args and list specified directory, error code: %v, error detail: %s,", common.MasterCheckAndListFailed, err.Error())
+			details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+				Code: common.MasterCheckAndListFailed,
+				Msg:  err.Error(),
+			})
+			return nil, details.Err()
+		}
+		applyResponse := applyFuture.Response().(*ApplyResponse)
+		response = applyResponse.Response
+		err = applyResponse.Error
+	} else {
+		response, err = operation.Apply()
+	}
 	if err != nil {
 		logrus.Errorf("Fail to check args and list specified directory, error code: %v, error detail: %s,", common.MasterCheckAndListFailed, err.Error())
 		details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
@@ -741,12 +761,33 @@ func (handler *MasterHandler) CheckAndList(ctx context.Context, args *pb.CheckAn
 // CheckAndStat is called by client. It checks args and return the specified file info.
 func (handler *MasterHandler) CheckAndStat(ctx context.Context, args *pb.CheckAndStatArgs) (*pb.CheckAndStatReply, error) {
 	logrus.WithContext(ctx).Infof("Get request for checking args and get the specified file info, path: %s", args.Path)
+	var (
+		response interface{}
+		err      error
+	)
+
 	RequestCountInc(handler.SelfAddr, common.OperationStat)
 	operation := &StatOperation{
 		Id:   util.GenerateUUIDString(),
 		Path: args.Path,
 	}
-	response, err := operation.Apply()
+	if args.IsLatest {
+		data := getData4Apply(operation, common.OperationStat)
+		applyFuture := handler.Raft.Apply(data, 5*time.Second)
+		if err := applyFuture.Error(); err != nil {
+			logrus.Errorf("Fail to check args and get the specified file info, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
+			details, _ := status.New(codes.Unknown, err.Error()).WithDetails(&pb.RPCError{
+				Code: common.MasterCheckAndStatFailed,
+				Msg:  err.Error(),
+			})
+			return nil, details.Err()
+		}
+		applyResponse := applyFuture.Response().(*ApplyResponse)
+		response = applyResponse.Response
+		err = applyResponse.Error
+	} else {
+		response, err = operation.Apply()
+	}
 	if err != nil {
 		logrus.Errorf("Fail to check args and get the specified file info, error code: %v, error detail: %s,", common.MasterCheckAndStatFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
