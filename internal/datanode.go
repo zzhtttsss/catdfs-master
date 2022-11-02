@@ -271,7 +271,7 @@ func BatchApplyPlan2DataNode(receiverPlan []int, senderPlan []int, chunkIds []st
 		chunkSendInfo := ChunkSendInfo{
 			ChunkId:    chunkIds[i],
 			DataNodeId: dataNodeIds[receiverPlan[i]],
-			SendType:   common.Copy,
+			SendType:   common.CopySendType,
 		}
 		dataNodeMap[dataNodeIds[dnIndex]].FutureSendChunks[chunkSendInfo] = common.WaitToInform
 	}
@@ -470,6 +470,9 @@ func IsNeed2Expand(newChunkNum int) bool {
 func GetAvgChunkNum() int {
 	updateMapLock.RLock()
 	defer updateMapLock.RUnlock()
+	if len(dataNodeMap) == 0 {
+		return 0
+	}
 	count := 0
 	for _, node := range dataNodeMap {
 		count += node.Chunks.Cardinality()

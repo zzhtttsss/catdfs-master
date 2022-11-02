@@ -129,6 +129,7 @@ func (o AddOperation) Apply() (interface{}, error) {
 		return rep, nil
 	case common.GetDataNodes:
 		dataNodes := BatchAllocateDataNodes(int(o.ChunkNum))
+		logrus.Warnf("%v", dataNodes)
 		chunks := make([]*Chunk, o.ChunkNum)
 		dataNodeIds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
 		dataNodeAdds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
@@ -318,7 +319,7 @@ func (e ExpandOperation) Apply() (interface{}, error) {
 			newFutureSendPlan := ChunkSendInfo{
 				ChunkId:    chunkId,
 				DataNodeId: e.ReceiverPlan,
-				SendType:   common.Move,
+				SendType:   common.MoveSendType,
 			}
 			fromNode.FutureSendChunks[newFutureSendPlan] = common.WaitToInform
 		}
