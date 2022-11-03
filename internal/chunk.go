@@ -41,10 +41,6 @@ type Chunk struct {
 	// It means these DataNode is already allocated to store this Chunk, but they
 	// have not truly store this Chunk in their hard drive.
 	pendingDataNodes set.Set
-	// Deprecated: primaryNode is the id of DataNode which has the lease of this Chunk.
-	// Operations involving the chunkserver are all communicated with the
-	// client by this DataNode
-	primaryNode string
 }
 
 func (c *Chunk) String() string {

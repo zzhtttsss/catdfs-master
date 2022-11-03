@@ -290,7 +290,7 @@ type ChunkSendInfo struct {
 // DegradeDataNode degrade a DataNode based on given stage. If DataNode is dead,
 // it will remove DataNode from dataNodeMap and put all Chunk's id in Chunks and
 // FutureSendChunks of the DataNode to pendingChunkQueue so that system can make
-// up the missing copies later
+// up the missing copies later.
 func DegradeDataNode(dataNodeId string, stage int) {
 	logrus.Infof("Start to degrade, datanode id: %s, stage: %v", dataNodeId, stage)
 	updateMapLock.Lock()
