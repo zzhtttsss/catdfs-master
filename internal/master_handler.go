@@ -4,18 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	mapset "github.com/deckarep/golang-set"
-	"github.com/hashicorp/go-hclog"
-	"github.com/hashicorp/raft"
-	raftboltdb "github.com/hashicorp/raft-boltdb"
-	"github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
-	"go.etcd.io/etcd/client/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"net"
 	"os"
 	"path/filepath"
@@ -23,6 +12,18 @@ import (
 	"time"
 	"tinydfs-base/config"
 	"tinydfs-base/util"
+
+	mapset "github.com/deckarep/golang-set"
+	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 
 	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
@@ -418,7 +419,7 @@ For:
 // Heartbeat is called by chunkserver. It sets the last heartbeat time to now time to
 // maintain the connection between chunkserver and master.
 func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
-	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
+	logrus.WithContext(ctx).Infof("[Id=%s] is ready %vly.", args.Id, args.IsReady)
 	successInfos := convChunkInfo(args.SuccessChunkInfos)
 	failInfos := convChunkInfo(args.FailChunkInfos)
 	operation := &HeartbeatOperation{

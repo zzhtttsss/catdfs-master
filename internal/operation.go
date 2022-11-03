@@ -90,7 +90,6 @@ type HeartbeatOperation struct {
 }
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
-	logrus.Infof("Heartbeat, id: %s", o.DataNodeId)
 	nextChunkInfos, ok := UpdateDataNode4Heartbeat(o)
 	if !ok {
 		return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
@@ -130,6 +129,7 @@ func (o AddOperation) Apply() (interface{}, error) {
 	case common.GetDataNodes:
 		dataNodes := BatchAllocateDataNodes(int(o.ChunkNum))
 		logrus.Warnf("%v", dataNodes)
+		logrus.Infof("%v", o)
 		chunks := make([]*Chunk, o.ChunkNum)
 		dataNodeIds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
 		dataNodeAdds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
