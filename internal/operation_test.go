@@ -3,10 +3,14 @@ package internal
 import (
 	"container/list"
 	"fmt"
+	"github.com/agiledragon/gomonkey"
+	"github.com/stretchr/testify/assert"
 	"io"
 	"os"
 	"sync"
 	"testing"
+	"tinydfs-base/common"
+	"tinydfs-base/protocol/pb"
 )
 
 func createRootFile(rootA *FileNode) func() {
@@ -105,4 +109,82 @@ func TestRead(t *testing.T) {
 func TestHeartbeatOperation_Apply(t *testing.T) {
 	a := []string{"a", "b", "c"}
 	fmt.Println(a[0:0])
+}
+
+func TestAddOperation_Apply(t *testing.T) {
+	type args struct {
+		o AddOperation
+	}
+	tests := []struct {
+		name       string
+		args       args
+		Setup      func(t *testing.T)
+		wantResult interface{}
+		wantErr    error
+	}{
+		{
+			name: "CheckArgs_Success",
+			args: args{
+				o: AddOperation{
+					Id:   "op1",
+					Size: 120 * common.MB,
+				},
+			},
+			Setup: func(t *testing.T) {
+				lockAndAddFileNode := gomonkey.ApplyFunc(LockAndAddFileNode, func(_ string, _ string, _ string,
+					_ int64, _ bool) (*FileNode, *list.List, error) {
+					return &FileNode{
+						Id:     "fileNode1",
+						Chunks: []string{"chunk1", "chunk2"},
+					}, &list.List{}, nil
+				})
+				t.Cleanup(func() {
+					lockAndAddFileNode.Reset()
+					lockedFileNodes = make(map[string]*list.List)
+				})
+			},
+			wantErr: nil,
+			wantResult: &pb.CheckArgs4AddReply{
+				FileNodeId: "fileNode1",
+				ChunkNum:   2,
+			},
+		},
+		{
+			name: "GetDataNodes_Success",
+			args: args{
+				o: AddOperation{
+					Id:   "op1",
+					Size: 120 * common.MB,
+				},
+			},
+			Setup: func(t *testing.T) {
+				batchAllocateDataNodes := gomonkey.ApplyFunc(BatchAllocateDataNodes, func(_ int) [][]*DataNode {
+					return nil
+				})
+				t.Cleanup(func() {
+					batchAllocateDataNodes.Reset()
+					lockedFileNodes = make(map[string]*list.List)
+				})
+			},
+			wantErr: nil,
+			wantResult: &pb.CheckArgs4AddReply{
+				FileNodeId: "fileNode1",
+				ChunkNum:   2,
+			},
+		},
+	}
+
+	// 执行测试用例
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.Setup != nil {
+				tt.Setup(t)
+			}
+			result, err := tt.args.o.Apply()
+			assert.Equal(t, tt.wantResult, result, "Unexpected result.")
+			if err != nil {
+				assert.EqualError(t, err, tt.wantErr.Error(), "Unexpected error.")
+			}
+		})
+	}
 }
