@@ -13,7 +13,6 @@ import (
 	"tinydfs-base/config"
 	"tinydfs-base/util"
 
-	set "github.com/deckarep/golang-set"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb"
@@ -371,57 +370,12 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	return rep, nil
 }
 
-// DoExpand gets the chunk copied according to this new dataNode.
-func DoExpand(dataNode *DataNode) int {
-	var (
-		pendingCount  = GetAvgChunkNum()
-		selfChunks    = dataNode.Chunks
-		pendingChunks = set.NewSet()
-		pendingMap    = map[string][]string{}
-	)
-For:
-	for {
-		notFound := true
-		for _, node := range dataNodeMap {
-			if node.status == common.Alive {
-				for chunk := range node.Chunks.Iter() {
-					if !pendingChunks.Contains(chunk) && !selfChunks.Contains(chunk) {
-						notFound = false
-						pendingChunks.Add(chunk)
-						if pendingDataNodeChunks, ok := pendingMap[node.Id]; ok {
-							pendingDataNodeChunks = append(pendingDataNodeChunks, chunk.(string))
-						} else {
-							pendingMap[node.Id] = []string{chunk.(string)}
-						}
-						if pendingChunks.Cardinality() == pendingCount {
-							break For
-						}
-						break
-					}
-				}
-			}
-		}
-		if notFound {
-			break
-		}
-	}
-	expandOperation := &ExpandOperation{
-		Id:           util.GenerateUUIDString(),
-		SenderPlan:   pendingMap,
-		ReceiverPlan: dataNode.Id,
-		ChunkIds:     util.Interfaces2TypeArr[string](pendingChunks.ToSlice()),
-	}
-	data := getData4Apply(expandOperation, common.OperationExpand)
-	GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
-	return pendingChunks.Cardinality()
-}
-
 // Heartbeat is called by chunkserver. It sets the last heartbeat time to now time to
 // maintain the connection between chunkserver and master.
 func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
 	logrus.WithContext(ctx).Infof("[Id=%s] is ready %vly.", args.Id, args.IsReady)
-	successInfos := convChunkInfo(args.SuccessChunkInfos)
-	failInfos := convChunkInfo(args.FailChunkInfos)
+	successInfos := ConvChunkInfo(args.SuccessChunkInfos)
+	failInfos := ConvChunkInfo(args.FailChunkInfos)
 	operation := &HeartbeatOperation{
 		Id:           util.GenerateUUIDString(),
 		DataNodeId:   args.Id,
@@ -451,37 +405,13 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		return nil, details.Err()
 	}
 	chunkSendInfos := (response.Response).([]ChunkSendInfo)
-	nextChunkInfos := deConvChunkInfo(chunkSendInfos)
+	nextChunkInfos := DeConvChunkInfo(chunkSendInfos)
 	dataNodeAddress := GetDataNodeAddresses(chunkSendInfos)
 	heartbeatReply := &pb.HeartbeatReply{
 		DataNodeAddress: dataNodeAddress,
 		ChunkInfos:      nextChunkInfos,
 	}
 	return heartbeatReply, nil
-}
-
-func convChunkInfo(chunkInfos []*pb.ChunkInfo) []ChunkSendInfo {
-	chunkSendInfos := make([]ChunkSendInfo, len(chunkInfos))
-	for i := 0; i < len(chunkInfos); i++ {
-		chunkSendInfos[i] = ChunkSendInfo{
-			ChunkId:    chunkInfos[i].ChunkId,
-			DataNodeId: chunkInfos[i].DataNodeId,
-			SendType:   int(chunkInfos[i].SendType),
-		}
-	}
-	return chunkSendInfos
-}
-
-func deConvChunkInfo(chunkSendInfos []ChunkSendInfo) []*pb.ChunkInfo {
-	chunkInfos := make([]*pb.ChunkInfo, len(chunkSendInfos))
-	for i := 0; i < len(chunkInfos); i++ {
-		chunkInfos[i] = &pb.ChunkInfo{
-			ChunkId:    chunkSendInfos[i].ChunkId,
-			DataNodeId: chunkSendInfos[i].DataNodeId,
-			SendType:   int32(chunkSendInfos[i].SendType),
-		}
-	}
-	return chunkInfos
 }
 
 // CheckArgs4Add is called by client. It checks whether the path and file name
