@@ -13,7 +13,7 @@ import (
 	"tinydfs-base/config"
 	"tinydfs-base/util"
 
-	mapset "github.com/deckarep/golang-set"
+	set "github.com/deckarep/golang-set"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb"
@@ -331,10 +331,11 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	dataNodeId := util.GenerateUUIDString()
 	// register first
 	operation := &RegisterOperation{
-		Id:         util.GenerateUUIDString(),
-		Address:    address,
-		DataNodeId: dataNodeId,
-		ChunkIds:   args.ChunkIds,
+		Id:           util.GenerateUUIDString(),
+		Address:      address,
+		DataNodeId:   dataNodeId,
+		ChunkIds:     args.ChunkIds,
+		IsNeedExpand: need2Expand,
 	}
 	data := getData4Apply(operation, common.OperationRegister)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
@@ -370,15 +371,14 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	return rep, nil
 }
 
-// DoExpand gets the chunk copied according to this new dataNode
+// DoExpand gets the chunk copied according to this new dataNode.
 func DoExpand(dataNode *DataNode) int {
 	var (
 		pendingCount  = GetAvgChunkNum()
 		selfChunks    = dataNode.Chunks
-		pendingChunks = mapset.NewSet()
+		pendingChunks = set.NewSet()
 		pendingMap    = map[string][]string{}
 	)
-	// can not stop util not finding the dataNode to copy
 For:
 	for {
 		notFound := true

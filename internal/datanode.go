@@ -461,6 +461,7 @@ func RestoreDataNodes(buf *bufio.Scanner) error {
 func IsNeed2Expand(newChunkNum int) bool {
 	avgChunkNum := GetAvgChunkNum()
 	diff := avgChunkNum - newChunkNum
+	// TODO 磁盘占有率
 	if diff >= 0 || diff <= 1 {
 		return false
 	}

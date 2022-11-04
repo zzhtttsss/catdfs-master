@@ -53,10 +53,11 @@ type OpContainer struct {
 }
 
 type RegisterOperation struct {
-	Id         string   `json:"id"`
-	Address    string   `json:"address"`
-	DataNodeId string   `json:"data_node_id"`
-	ChunkIds   []string `json:"chunkIds"`
+	Id           string   `json:"id"`
+	Address      string   `json:"address"`
+	DataNodeId   string   `json:"data_node_id"`
+	ChunkIds     []string `json:"chunkIds"`
+	IsNeedExpand bool     `json:"is_need_expand"`
 }
 
 func (o RegisterOperation) Apply() (interface{}, error) {
@@ -65,9 +66,13 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 	for _, id := range o.ChunkIds {
 		newSet.Add(id)
 	}
+	status := common.Alive
+	if o.IsNeedExpand {
+		status = common.Cold
+	}
 	datanode := &DataNode{
 		Id:               o.DataNodeId,
-		status:           common.Cold,
+		status:           status,
 		Address:          o.Address,
 		Chunks:           newSet,
 		IOLoad:           0,
@@ -369,6 +374,11 @@ func (d DataCheckOperation) Apply() (interface{}, error) {
 		for chunkId := range node.Chunks.Iter() {
 			fileNodeId := strings.Split(chunkId.(string), common.ChunkIdDelimiter)[0]
 			if !fileNodeIdSet.Contains(fileNodeId) {
+				node.FutureSendChunks[ChunkSendInfo{
+					ChunkId:    chunkId.(string),
+					DataNodeId: "",
+					SendType:   common.DeleteSendType,
+				}] = common.WaitToInform
 				node.Chunks.Remove(chunkId)
 			}
 		}
