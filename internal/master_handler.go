@@ -365,7 +365,9 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		Id:           id,
 		PendingCount: uint32(pendingCount + len(args.ChunkIds)),
 	}
-	logrus.WithContext(ctx).Infof("Success to register a datanode from chunkserver, address: %s, id: %s", address, id)
+	logrus.Infof("PendingCount: %d", rep.PendingCount)
+	logrus.WithContext(ctx).Infof("Success to register a datanode from chunkserver, address: %s, id: %s, isNeedToExpand: %v",
+		address, id, need2Expand)
 	csCountMonitor.Inc()
 	return rep, nil
 }

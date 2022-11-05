@@ -123,6 +123,7 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 	}
 	if isFile {
 		fileNodeIdSet.Add(newNode.Id)
+		fmt.Printf("1 fileNodeIdSet add: %s", fileNodeIdSet.String())
 		newNode.Chunks = initChunks(size, id)
 
 	} else {
@@ -153,6 +154,8 @@ func LockAndAddFileNode(id string, path string, filename string, size int64, isF
 		DelTime:    nil,
 	}
 	if isFile {
+		fileNodeIdSet.Add(newNode.Id)
+		fmt.Printf("1 fileNodeIdSet add: %s", fileNodeIdSet.String())
 		newNode.Chunks = initChunks(size, id)
 	} else {
 		newNode.ChildNodes = make(map[string]*FileNode)

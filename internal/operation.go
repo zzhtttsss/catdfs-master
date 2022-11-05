@@ -35,6 +35,8 @@ func init() {
 	OpTypeMap[common.OperationAllocateChunks] = reflect.TypeOf(AllocateChunksOperation{})
 	OpTypeMap[common.OperationExpand] = reflect.TypeOf(ExpandOperation{})
 	OpTypeMap[common.OperationDegrade] = reflect.TypeOf(DegradeOperation{})
+	OpTypeMap[common.OperationTreeCheck] = reflect.TypeOf(TreeCheckOperation{})
+	OpTypeMap[common.OperationDataCheck] = reflect.TypeOf(DataCheckOperation{})
 }
 
 // Operation represents requests to make changes to metadata. If we want to modify the metadata,
@@ -80,7 +82,7 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 		FutureSendChunks: make(map[ChunkSendInfo]int),
 	}
 	AddDataNode(datanode)
-	logrus.Infof("[Id=%s] Connected", o.DataNodeId)
+	logrus.Infof("[Id=%s] Connected, status %v", o.DataNodeId, status)
 	return o.DataNodeId, nil
 }
 
@@ -341,6 +343,7 @@ type TreeCheckOperation struct {
 }
 
 func (t TreeCheckOperation) Apply() (interface{}, error) {
+	logrus.Infof("Start checking direcotry tree.")
 	queue := util.NewQueue[*FileNode]()
 	queue.Push(root)
 	for queue.Len() != 0 {
@@ -348,6 +351,7 @@ func (t TreeCheckOperation) Apply() (interface{}, error) {
 		if cur.IsDel && time.Now().Sub(*cur.DelTime).Hours() > 23 {
 			fileNodeIdSet.Remove(cur.Id)
 			if cur.ParentNode != nil {
+				logrus.Infof("Delete rubbish %s", cur.FileName)
 				delete(cur.ParentNode.ChildNodes, cur.FileName)
 				continue
 			}
@@ -358,6 +362,7 @@ func (t TreeCheckOperation) Apply() (interface{}, error) {
 			}
 		}
 	}
+	logrus.Infof("Check done.")
 	return nil, nil
 }
 
@@ -366,10 +371,13 @@ type DataCheckOperation struct {
 }
 
 func (d DataCheckOperation) Apply() (interface{}, error) {
+	logrus.Infof("Start cleaning up rubbish in dataMap and chunkMap.")
 	for _, node := range dataNodeMap {
 		for chunkId := range node.Chunks.Iter() {
 			fileNodeId := strings.Split(chunkId.(string), common.ChunkIdDelimiter)[0]
 			if !fileNodeIdSet.Contains(fileNodeId) {
+				fmt.Printf("%s does not contain %s", fileNodeIdSet.ToSlice(), fileNodeId)
+				logrus.Infof("Find rubbish chunk %s in dataNode %s", chunkId, node.Id)
 				node.FutureSendChunks[ChunkSendInfo{
 					ChunkId:    chunkId.(string),
 					DataNodeId: "",
@@ -385,5 +393,6 @@ func (d DataCheckOperation) Apply() (interface{}, error) {
 			delete(chunksMap, id)
 		}
 	}
+	logrus.Infof("Clean up done.")
 	return nil, nil
 }
