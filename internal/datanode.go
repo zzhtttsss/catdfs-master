@@ -259,7 +259,10 @@ func GetDataNodeAddresses(chunkSendInfos []ChunkSendInfo) []string {
 	defer updateMapLock.RUnlock()
 	adds := make([]string, 0, len(dataNodeMap))
 	for _, info := range chunkSendInfos {
-		adds = append(adds, dataNodeMap[info.DataNodeId].Address)
+		if _, ok := dataNodeMap[info.DataNodeId]; ok {
+			adds = append(adds, dataNodeMap[info.DataNodeId].Address)
+		}
+
 	}
 	return adds
 }
@@ -487,10 +490,7 @@ func IsNeed2Expand(newChunkNum int) bool {
 	avgChunkNum := GetAvgChunkNum()
 	diff := avgChunkNum - newChunkNum
 	// TODO 磁盘占有率
-	if diff >= 0 || diff <= 1 {
-		return false
-	}
-	return true
+	return diff > 1
 }
 
 func GetAvgChunkNum() int {
@@ -509,6 +509,7 @@ func GetAvgChunkNum() int {
 
 // DoExpand gets the chunk copied according to this new dataNode.
 func DoExpand(dataNode *DataNode) int {
+	logrus.Infof("Start to expand with dataNode %s", dataNode.Id)
 	var (
 		pendingCount  = GetAvgChunkNum()
 		selfChunks    = dataNode.Chunks
