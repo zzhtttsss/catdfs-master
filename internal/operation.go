@@ -119,13 +119,10 @@ type AddOperation struct {
 func (o AddOperation) Apply() (interface{}, error) {
 	switch o.Stage {
 	case common.CheckArgs:
-		fileNode, stack, err := LockAndAddFileNode(o.FileNodeId, o.Path, o.FileName, o.Size, common.IsFile4AddFile)
+		fileNode, err := LockAndAddFileNode(o.FileNodeId, o.Path, o.FileName, o.Size, common.IsFile4AddFile)
 		if err != nil {
 			return nil, err
 		}
-		fileNodesMapLock.Lock()
-		lockedFileNodes[fileNode.Id] = stack
-		fileNodesMapLock.Unlock()
 		rep := &pb.CheckArgs4AddReply{
 			FileNodeId: fileNode.Id,
 			ChunkNum:   int32(len(fileNode.Chunks)),
@@ -177,8 +174,7 @@ func (o AddOperation) Apply() (interface{}, error) {
 		}
 		BatchUpdatePendingDataNodes(o.Infos)
 		BatchAddChunks(o.Infos)
-		err := UnlockFileNodesById(o.FileNodeId, false)
-		return nil, err
+		return nil, nil
 	default:
 		return nil, nil
 	}
