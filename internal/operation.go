@@ -21,6 +21,8 @@ var (
 	OpTypeMap = make(map[string]reflect.Type)
 )
 
+const DayHour = 24
+
 func init() {
 	OpTypeMap[common.OperationRegister] = reflect.TypeOf(RegisterOperation{})
 	OpTypeMap[common.OperationHeartbeat] = reflect.TypeOf(HeartbeatOperation{})
@@ -35,8 +37,8 @@ func init() {
 	OpTypeMap[common.OperationAllocateChunks] = reflect.TypeOf(AllocateChunksOperation{})
 	OpTypeMap[common.OperationExpand] = reflect.TypeOf(ExpandOperation{})
 	OpTypeMap[common.OperationDegrade] = reflect.TypeOf(DegradeOperation{})
-	OpTypeMap[common.OperationTreeCheck] = reflect.TypeOf(TreeCheckOperation{})
-	OpTypeMap[common.OperationDataCheck] = reflect.TypeOf(DataCheckOperation{})
+	OpTypeMap[common.OperationTreeCheck] = reflect.TypeOf(CheckFileTreeOperation{})
+	OpTypeMap[common.OperationDataCheck] = reflect.TypeOf(CheckChunksOperation{})
 }
 
 // Operation represents requests to make changes to metadata. If we want to modify the metadata,
@@ -121,7 +123,7 @@ type AddOperation struct {
 func (o AddOperation) Apply() (interface{}, error) {
 	switch o.Stage {
 	case common.CheckArgs:
-		fileNode, err := LockAndAddFileNode(o.FileNodeId, o.Path, o.FileName, o.Size, common.IsFile4AddFile)
+		fileNode, err := AddFileNode(o.Path, o.FileName, o.Size, common.IsFile4AddFile)
 		if err != nil {
 			return nil, err
 		}
@@ -336,26 +338,28 @@ func (e ExpandOperation) Apply() (interface{}, error) {
 	return nil, nil
 }
 
-type TreeCheckOperation struct {
+type CheckFileTreeOperation struct {
 	Id string `json:"id"`
 }
 
-func (t TreeCheckOperation) Apply() (interface{}, error) {
+func (t CheckFileTreeOperation) Apply() (interface{}, error) {
 	logrus.Infof("Start checking direcotry tree.")
 	queue := util.NewQueue[*FileNode]()
 	queue.Push(root)
 	for queue.Len() != 0 {
 		cur := queue.Pop()
-		if cur.IsDel && time.Now().Sub(*cur.DelTime).Hours() > 23 {
+		if cur.IsDel && time.Now().Sub(*cur.DelTime).Hours() >= DayHour {
 			fileNodeIdSet.Remove(cur.Id)
 			if cur.ParentNode != nil {
 				logrus.Infof("Delete rubbish %s", cur.FileName)
 				delete(cur.ParentNode.ChildNodes, cur.FileName)
-				continue
 			}
 		}
 		if cur.ChildNodes != nil && len(cur.ChildNodes) != 0 {
 			for _, node := range cur.ChildNodes {
+				if !fileNodeIdSet.Contains(cur.ParentNode.Id) {
+					fileNodeIdSet.Remove(node.Id)
+				}
 				queue.Push(node)
 			}
 		}
@@ -364,11 +368,11 @@ func (t TreeCheckOperation) Apply() (interface{}, error) {
 	return nil, nil
 }
 
-type DataCheckOperation struct {
+type CheckChunksOperation struct {
 	Id string `json:"id"`
 }
 
-func (d DataCheckOperation) Apply() (interface{}, error) {
+func (d CheckChunksOperation) Apply() (interface{}, error) {
 	logrus.Infof("Start cleaning up rubbish in dataMap and chunkMap.")
 	for _, node := range dataNodeMap {
 		logrus.Debugf("chunks %s in dataNode %s", node.Chunks.String(), node.Id)

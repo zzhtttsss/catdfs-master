@@ -82,7 +82,6 @@ func getFileNode(path string) (*FileNode, bool) {
 	currentNode := root
 	path = strings.Trim(path, pathSplitString)
 	fileNames := strings.Split(path, pathSplitString)
-
 	if path == root.FileName {
 		return currentNode, true
 	}
@@ -90,6 +89,9 @@ func getFileNode(path string) (*FileNode, bool) {
 	for _, name := range fileNames {
 		nextNode, exist := currentNode.ChildNodes[name]
 		if !exist {
+			return nil, false
+		}
+		if nextNode.IsDel {
 			return nil, false
 		}
 		currentNode = nextNode
@@ -120,40 +122,8 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 		IsDel:      false,
 		DelTime:    nil,
 	}
+	fileNodeIdSet.Add(newNode.Id)
 	if isFile {
-		fileNodeIdSet.Add(newNode.Id)
-		fmt.Printf("1 fileNodeIdSet add: %s", fileNodeIdSet.String())
-		newNode.Chunks = initChunks(size, id)
-
-	} else {
-		newNode.ChildNodes = make(map[string]*FileNode)
-	}
-	fileNode.ChildNodes[filename] = newNode
-	return newNode, nil
-}
-
-// LockAndAddFileNode add a FileNode to directory tree without unlock any FileNode.
-// It is generally used to add a file. After calling this method, we must call
-// UnlockFileNodesById to unlock all FileNode.
-func LockAndAddFileNode(id string, path string, filename string, size int64, isFile bool) (*FileNode, error) {
-	fileNode, isExist := getFileNode(path)
-	if !isExist || fileNode.IsFile {
-		return nil, fmt.Errorf("path not exist, path : %s", path)
-	}
-	if _, ok := fileNode.ChildNodes[filename]; ok {
-		return nil, fmt.Errorf("target path already has file with the same name, path : %s", path)
-	}
-	newNode := &FileNode{
-		Id:         id,
-		FileName:   filename,
-		ParentNode: fileNode,
-		Size:       size,
-		IsFile:     isFile,
-		IsDel:      false,
-		DelTime:    nil,
-	}
-	if isFile {
-		fileNodeIdSet.Add(newNode.Id)
 		newNode.Chunks = initChunks(size, id)
 	} else {
 		newNode.ChildNodes = make(map[string]*FileNode)
@@ -449,9 +419,7 @@ func buildTree(cur *FileNode, nodeMap map[string]*FileNode) {
 		delete(cur.ChildNodes, id)
 		cur.ChildNodes[node.FileName] = node
 		node.ParentNode = cur
-		if node.IsFile {
-			fileNodeIdSet.Add(node.Id)
-		}
+		fileNodeIdSet.Add(node.Id)
 		buildTree(node, nodeMap)
 	}
 }

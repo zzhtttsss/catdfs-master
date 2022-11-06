@@ -262,8 +262,8 @@ func GetDataNodeAddresses(chunkSendInfos []ChunkSendInfo) []string {
 	defer updateMapLock.RUnlock()
 	adds := make([]string, 0, len(dataNodeMap))
 	for _, info := range chunkSendInfos {
-		if _, ok := dataNodeMap[info.DataNodeId]; ok {
-			adds = append(adds, dataNodeMap[info.DataNodeId].Address)
+		if node, ok := dataNodeMap[info.DataNodeId]; ok {
+			adds = append(adds, node.Address)
 		}
 
 	}
