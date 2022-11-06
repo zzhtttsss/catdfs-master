@@ -198,13 +198,16 @@ func UpdateDataNode4Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	dataNode.IOLoad = int(o.IOLoad)
 	for _, info := range o.SuccessInfos {
 		delete(dataNode.FutureSendChunks, info)
-		dataNodeMap[info.DataNodeId].Chunks.Add(info.ChunkId)
+		if dataNodeS, ok := dataNodeMap[info.DataNodeId]; ok {
+			dataNodeS.Chunks.Add(info.ChunkId)
+		}
 	}
 	for _, info := range o.FailInfos {
 		delete(dataNode.FutureSendChunks, info)
 		pendingChunkQueue.Push(String(info.ChunkId))
 	}
 	nextChunkInfos := make([]ChunkSendInfo, 0, len(dataNode.FutureSendChunks))
+	logrus.Debugf("[dataNode=%s] FutureSendChunks %v", dataNode.Id, dataNode.FutureSendChunks)
 	for info, i := range dataNode.FutureSendChunks {
 		if i != common.WaitToSend {
 			nextChunkInfos = append(nextChunkInfos, info)

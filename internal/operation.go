@@ -132,8 +132,6 @@ func (o AddOperation) Apply() (interface{}, error) {
 		return rep, nil
 	case common.GetDataNodes:
 		dataNodes := BatchAllocateDataNodes(int(o.ChunkNum))
-		logrus.Warnf("%v", dataNodes)
-		logrus.Infof("%v", o)
 		chunks := make([]*Chunk, o.ChunkNum)
 		dataNodeIds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
 		dataNodeAdds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
@@ -373,16 +371,17 @@ type DataCheckOperation struct {
 func (d DataCheckOperation) Apply() (interface{}, error) {
 	logrus.Infof("Start cleaning up rubbish in dataMap and chunkMap.")
 	for _, node := range dataNodeMap {
-		for chunkId := range node.Chunks.Iter() {
+		logrus.Debugf("chunks %s in dataNode %s", node.Chunks.String(), node.Id)
+		for _, chunkId := range node.Chunks.ToSlice() {
 			fileNodeId := strings.Split(chunkId.(string), common.ChunkIdDelimiter)[0]
 			if !fileNodeIdSet.Contains(fileNodeId) {
-				fmt.Printf("%s does not contain %s", fileNodeIdSet.ToSlice(), fileNodeId)
-				logrus.Infof("Find rubbish chunk %s in dataNode %s", chunkId, node.Id)
+				logrus.Debugf("Find rubbish chunk %s in dataNode %s", chunkId, node.Id)
 				node.FutureSendChunks[ChunkSendInfo{
 					ChunkId:    chunkId.(string),
 					DataNodeId: "",
 					SendType:   common.DeleteSendType,
 				}] = common.WaitToInform
+				logrus.Debugf("remove this chunk")
 				node.Chunks.Remove(chunkId)
 			}
 		}
