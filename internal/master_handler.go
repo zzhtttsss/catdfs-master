@@ -815,7 +815,8 @@ func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.Check
 	data := getData4Apply(operation, common.OperationRename)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
 	if err := applyFuture.Error(); err != nil {
-		logrus.Errorf("Fail to check args and rename the specified file to a new name, error code: %v, error detail: %s,", common.MasterCheckAndRenameFailed, err.Error())
+		logrus.Errorf("Fail to check args and rename the specified file to a new name, error code: %v, error detail: %s,",
+			common.MasterCheckAndRenameFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndRenameFailed,
 			Msg:  err.Error(),
@@ -824,7 +825,8 @@ func (handler *MasterHandler) CheckAndRename(ctx context.Context, args *pb.Check
 	}
 	response := (applyFuture.Response()).(*ApplyResponse)
 	if err := response.Error; err != nil {
-		logrus.Errorf("Fail to check args and rename the specified file to a new name, error code: %v, error detail: %s,", common.MasterCheckAndRenameFailed, err.Error())
+		logrus.Errorf("Fail to check args and rename the specified file to a new name, error code: %v, error detail: %s,",
+			common.MasterCheckAndRenameFailed, err.Error())
 		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
 			Code: common.MasterCheckAndRenameFailed,
 			Msg:  err.Error(),
