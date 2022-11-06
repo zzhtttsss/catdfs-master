@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"fmt"
 	mapset "github.com/deckarep/golang-set"
 	"testing"
@@ -51,36 +50,28 @@ func TestMain(m *testing.M) {
 			Leases:        mapset.NewSet(),
 			HeartbeatTime: time.Time{},
 		},
-		"dn6": {
-			Id:            "dn6",
-			status:        common.Alive,
-			Address:       "dn6:6789",
-			Chunks:        mapset.NewSet(),
-			Leases:        mapset.NewSet(),
-			HeartbeatTime: time.Time{},
-		},
 	}
 	m.Run()
 }
 
+type stu struct {
+	a mapset.Set
+	b map[ChunkSendInfo]int
+}
+
 func TestGetDataNode2MoveChunk(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func(ctx context.Context) {
-		defer fmt.Println("子routine退出")
-		for {
-			select {
-			case <-ctx.Done():
-				fmt.Println("收到退出信号")
-				return
-			default:
-				fmt.Println("执行一项耗时任务")
-				time.Sleep(5 * time.Second)
-				fmt.Println("执行完毕")
-				break
-			}
-		}
-	}(ctx)
-	time.Sleep(10 * time.Second)
-	cancel()
-	time.Sleep(10 * time.Second)
+	mm := map[*stu]int{}
+	aa := &stu{
+		a: mapset.NewSet("aa"),
+		b: map[ChunkSendInfo]int{
+			ChunkSendInfo{
+				ChunkId:    "sdf",
+				DataNodeId: "adsf",
+				SendType:   0,
+			}: 2,
+		},
+	}
+	mm[aa] = 1
+	mm[aa] = 2
+	fmt.Println(mm[aa])
 }

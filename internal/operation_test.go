@@ -99,10 +99,4 @@ func TestRead(t *testing.T) {
 		}
 		fmt.Println(string(bytes[:n]))
 	}
-
-}
-
-func TestHeartbeatOperation_Apply(t *testing.T) {
-	a := []string{"a", "b", "c"}
-	fmt.Println(a[0:0])
 }

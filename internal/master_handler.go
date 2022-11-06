@@ -4,17 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/hashicorp/go-hclog"
-	"github.com/hashicorp/raft"
-	raftboltdb "github.com/hashicorp/raft-boltdb"
-	"github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
-	"go.etcd.io/etcd/client/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"net"
 	"os"
 	"path/filepath"
@@ -22,6 +12,17 @@ import (
 	"time"
 	"tinydfs-base/config"
 	"tinydfs-base/util"
+
+	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 
 	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
@@ -292,6 +293,8 @@ func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
 				go MonitorHeartbeat(subContext)
 				go MonitorPendingChunk(subContext)
+				go CleanupRubbish(subContext)
+				go DirectoryCheck(subContext)
 				logrus.Infof("Become leader, success to change etcd leader infomation and monitor datanodes")
 			} else {
 				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
@@ -323,10 +326,15 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	p, _ := peer.FromContext(ctx)
 	address := strings.Split(p.Addr.String(), ":")[0]
 	logrus.WithContext(ctx).Infof("Get request for registering a datanode from chunkserver, address: %s", address)
+	need2Expand := IsNeed2Expand(len(args.ChunkIds))
+	dataNodeId := util.GenerateUUIDString()
+	// register first
 	operation := &RegisterOperation{
-		Id:         util.GenerateUUIDString(),
-		Address:    address,
-		DataNodeId: util.GenerateUUIDString(),
+		Id:           util.GenerateUUIDString(),
+		Address:      address,
+		DataNodeId:   dataNodeId,
+		ChunkIds:     args.ChunkIds,
+		IsNeedExpand: need2Expand,
 	}
 	data := getData4Apply(operation, common.OperationRegister)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
@@ -347,21 +355,28 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		})
 		return nil, details.Err()
 	}
+	// At that time, the new datanode has registered
+	pendingCount := 0
+	if need2Expand {
+		pendingCount = DoExpand(GetDataNode(dataNodeId))
+	}
 	id := response.Response.(string)
 	rep := &pb.DNRegisterReply{
-		Id: id,
+		Id:           id,
+		PendingCount: uint32(pendingCount + len(args.ChunkIds)),
 	}
-	logrus.WithContext(ctx).Infof("Success to register a datanode from chunkserver, address: %s, id: %s", address, id)
+	logrus.WithContext(ctx).Infof("Success to register a datanode from chunkserver, address: %s, id: %s, isNeedToExpand: %v",
+		address, id, need2Expand)
 	csCountMonitor.Inc()
 	return rep, nil
 }
 
-// Heartbeat is called by chunkserver. It sets the last heartbeat time to now to
+// Heartbeat is called by chunkserver. It sets the last heartbeat time to now time to
 // maintain the connection between chunkserver and master.
 func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatArgs) (*pb.HeartbeatReply, error) {
-	logrus.WithContext(ctx).Infof("[Id=%s] Get heartbeat.", args.Id)
-	successInfos := convChunkInfo(args.SuccessChunkInfos)
-	failInfos := convChunkInfo(args.FailChunkInfos)
+	logrus.WithContext(ctx).Infof("[Id=%s] is ready %vly.", args.Id, args.IsReady)
+	successInfos := ConvChunkInfo(args.SuccessChunkInfos)
+	failInfos := ConvChunkInfo(args.FailChunkInfos)
 	operation := &HeartbeatOperation{
 		Id:           util.GenerateUUIDString(),
 		DataNodeId:   args.Id,
@@ -369,6 +384,7 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		IOLoad:       args.IOLoad,
 		SuccessInfos: successInfos,
 		FailInfos:    failInfos,
+		IsReady:      args.IsReady,
 	}
 	data := getData4Apply(operation, common.OperationHeartbeat)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
@@ -390,35 +406,13 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		return nil, details.Err()
 	}
 	chunkSendInfos := (response.Response).([]ChunkSendInfo)
-	nextChunkInfos := deConvChunkInfo(chunkSendInfos)
+	nextChunkInfos := DeConvChunkInfo(chunkSendInfos)
 	dataNodeAddress := GetDataNodeAddresses(chunkSendInfos)
 	heartbeatReply := &pb.HeartbeatReply{
 		DataNodeAddress: dataNodeAddress,
 		ChunkInfos:      nextChunkInfos,
 	}
 	return heartbeatReply, nil
-}
-
-func convChunkInfo(chunkInfos []*pb.ChunkInfo) []ChunkSendInfo {
-	chunkSendInfos := make([]ChunkSendInfo, len(chunkInfos))
-	for i := 0; i < len(chunkInfos); i++ {
-		chunkSendInfos[i] = ChunkSendInfo{
-			ChunkId:    chunkInfos[i].ChunkId,
-			DataNodeId: chunkInfos[i].DataNodeId,
-		}
-	}
-	return chunkSendInfos
-}
-
-func deConvChunkInfo(chunkSendInfos []ChunkSendInfo) []*pb.ChunkInfo {
-	chunkInfos := make([]*pb.ChunkInfo, len(chunkSendInfos))
-	for i := 0; i < len(chunkInfos); i++ {
-		chunkInfos[i] = &pb.ChunkInfo{
-			ChunkId:    chunkSendInfos[i].ChunkId,
-			DataNodeId: chunkSendInfos[i].DataNodeId,
-		}
-	}
-	return chunkInfos
 }
 
 // CheckArgs4Add is called by client. It checks whether the path and file name

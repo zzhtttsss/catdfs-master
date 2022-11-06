@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"strings"
-	"sync"
 	"testing"
+	"tinydfs-base/common"
 	"tinydfs-base/util"
 )
 
@@ -22,22 +22,19 @@ type NodeTestCase struct {
 // initRoot 根据path构造目录树
 func initRoot(path string) {
 	pp := strings.Split(path, pathSplitString)
-	//TODO 最后一个是否为文件
 	n := len(pp)
 	nextNode := &FileNode{
-		Id:             util.GenerateUUIDString(),
-		FileName:       pp[n-1],
-		ChildNodes:     map[string]*FileNode{},
-		IsFile:         true,
-		UpdateNodeLock: &sync.RWMutex{},
+		Id:         util.GenerateUUIDString(),
+		FileName:   pp[n-1],
+		ChildNodes: map[string]*FileNode{},
+		IsFile:     true,
 	}
 	for i := n - 2; i >= 1; i-- {
 		curNode := &FileNode{
-			Id:             util.GenerateUUIDString(),
-			FileName:       pp[i],
-			ChildNodes:     map[string]*FileNode{},
-			IsFile:         false,
-			UpdateNodeLock: &sync.RWMutex{},
+			Id:         util.GenerateUUIDString(),
+			FileName:   pp[i],
+			ChildNodes: map[string]*FileNode{},
+			IsFile:     false,
 		}
 		curNode.ChildNodes[nextNode.FileName] = nextNode
 		nextNode.ParentNode = curNode
@@ -98,16 +95,8 @@ func TestGetAndLockByPath(t *testing.T) {
 			if c.initRootFunc != nil {
 				c.initRootFunc(c.path)
 			}
-			_, s, exist := getAndLockByPath(c.path, c.isRead)
+			_, exist := getFileNode(c.path)
 			assert.Equal(t, c.expectIsFileExist, exist)
-			assert.Equal(t, c.expectStackLength, s.Len())
-			// 判断最后一个是读锁还是写锁
-			if s.Len() != 0 {
-				node, ok := s.Back().Value.(*FileNode)
-				assert.True(t, ok)
-				assert.Equal(t, c.expectCanReadLockOn, node.UpdateNodeLock.TryRLock())
-				unlockAllMutex(s, c.isRead)
-			}
 		})
 	}
 }
@@ -152,19 +141,19 @@ func TestInitChunks(t *testing.T) {
 		expectLastChunkName  string
 	}{
 		"a": {
-			size:                 1024,
+			size:                 common.ChunkSize,
 			id:                   "a",
 			expectFirstChunkName: "a0",
 			expectLastChunkName:  "a0",
 		},
 		"b": {
-			size:                 1023,
+			size:                 common.ChunkSize - 1,
 			id:                   "b",
 			expectFirstChunkName: "b0",
 			expectLastChunkName:  "b0",
 		},
 		"c": {
-			size:                 1025,
+			size:                 common.ChunkSize + 1,
 			id:                   "c",
 			expectFirstChunkName: "c0",
 			expectLastChunkName:  "c1",
