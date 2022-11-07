@@ -60,7 +60,7 @@ func CleanupRubbish(ctx context.Context) {
 	for {
 		select {
 		case <-timer.C:
-			data := getData4Apply(DataCheckOperation{Id: util.GenerateUUIDString()}, common.OperationDataCheck)
+			data := getData4Apply(CheckChunksOperation{Id: util.GenerateUUIDString()}, common.OperationDataCheck)
 			GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
 		case <-ctx.Done():
 			return
@@ -75,7 +75,7 @@ func DirectoryCheck(ctx context.Context) {
 	for {
 		select {
 		case <-timer.C:
-			data := getData4Apply(TreeCheckOperation{Id: util.GenerateUUIDString()}, common.OperationTreeCheck)
+			data := getData4Apply(CheckFileTreeOperation{Id: util.GenerateUUIDString()}, common.OperationTreeCheck)
 			GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
 		case <-ctx.Done():
 			return
