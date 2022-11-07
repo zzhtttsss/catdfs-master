@@ -38,6 +38,7 @@ var Logger *logrus.Logger
 func init() {
 	config.InitConfig()
 	Logger = config.InitLogger(Logger, true)
+	Logger.SetLevel(logrus.Level(viper.GetInt(common.MasterLogLevel)))
 
 }
 
