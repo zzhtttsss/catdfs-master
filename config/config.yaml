@@ -5,6 +5,14 @@ master:
   raftDir: "./raftData"
   cleanupTime: 86400
   directoryCheckTime: 86200
+  # PanicLevel = 0
+  #	FatalLevel = 1
+  #	ErrorLevel = 2
+  #	WarnLevel = 3
+  #	InfoLevel = 4
+  #	DebugLevel = 5
+  #	TraceLevel = 6
+  logLevel: 4
 
 # chunk server config
 chunk:
