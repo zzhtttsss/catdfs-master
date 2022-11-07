@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 	"tinydfs-base/common"
 	"tinydfs-base/protocol/pb"
@@ -19,6 +20,8 @@ var (
 	// operation> into this map.
 	OpTypeMap = make(map[string]reflect.Type)
 )
+
+const DayHour = 24
 
 func init() {
 	OpTypeMap[common.OperationRegister] = reflect.TypeOf(RegisterOperation{})
@@ -34,6 +37,8 @@ func init() {
 	OpTypeMap[common.OperationAllocateChunks] = reflect.TypeOf(AllocateChunksOperation{})
 	OpTypeMap[common.OperationExpand] = reflect.TypeOf(ExpandOperation{})
 	OpTypeMap[common.OperationDegrade] = reflect.TypeOf(DegradeOperation{})
+	OpTypeMap[common.OperationTreeCheck] = reflect.TypeOf(CheckFileTreeOperation{})
+	OpTypeMap[common.OperationDataCheck] = reflect.TypeOf(CheckChunksOperation{})
 }
 
 // Operation represents requests to make changes to metadata. If we want to modify the metadata,
@@ -52,25 +57,34 @@ type OpContainer struct {
 }
 
 type RegisterOperation struct {
-	Id         string `json:"id"`
-	Address    string `json:"address"`
-	DataNodeId string `json:"data_node_id"`
+	Id           string   `json:"id"`
+	Address      string   `json:"address"`
+	DataNodeId   string   `json:"data_node_id"`
+	ChunkIds     []string `json:"chunkIds"`
+	IsNeedExpand bool     `json:"is_need_expand"`
 }
 
 func (o RegisterOperation) Apply() (interface{}, error) {
 	logrus.Infof("register, address: %s", o.Address)
+	newSet := set.NewSet()
+	for _, id := range o.ChunkIds {
+		newSet.Add(id)
+	}
+	status := common.Alive
+	if o.IsNeedExpand {
+		status = common.Cold
+	}
 	datanode := &DataNode{
 		Id:               o.DataNodeId,
-		status:           common.Alive,
+		status:           status,
 		Address:          o.Address,
-		Chunks:           set.NewSet(),
-		FutureSendChunks: make(map[ChunkSendInfo]int),
+		Chunks:           newSet,
 		IOLoad:           0,
 		HeartbeatTime:    time.Now(),
+		FutureSendChunks: make(map[ChunkSendInfo]int),
 	}
-
 	AddDataNode(datanode)
-	logrus.Infof("[Id=%s] Connected", o.DataNodeId)
+	logrus.Infof("[Id=%s] Connected, status %v", o.DataNodeId, status)
 	return o.DataNodeId, nil
 }
 
@@ -81,10 +95,10 @@ type HeartbeatOperation struct {
 	IOLoad       int64           `json:"io_load"`
 	SuccessInfos []ChunkSendInfo `json:"success_infos"`
 	FailInfos    []ChunkSendInfo `json:"fail_infos"`
+	IsReady      bool            `json:"is_ready"`
 }
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
-	logrus.Infof("Heartbeat, id: %s", o.DataNodeId)
 	nextChunkInfos, ok := UpdateDataNode4Heartbeat(o)
 	if !ok {
 		return nil, fmt.Errorf("datanode %s not exist", o.DataNodeId)
@@ -109,13 +123,10 @@ type AddOperation struct {
 func (o AddOperation) Apply() (interface{}, error) {
 	switch o.Stage {
 	case common.CheckArgs:
-		fileNode, stack, err := LockAndAddFileNode(o.FileNodeId, o.Path, o.FileName, o.Size, common.IsFile4AddFile)
+		fileNode, err := AddFileNode(o.Path, o.FileName, o.Size, common.IsFile4AddFile)
 		if err != nil {
 			return nil, err
 		}
-		fileNodesMapLock.Lock()
-		lockedFileNodes[fileNode.Id] = stack
-		fileNodesMapLock.Unlock()
 		rep := &pb.CheckArgs4AddReply{
 			FileNodeId: fileNode.Id,
 			ChunkNum:   int32(len(fileNode.Chunks)),
@@ -165,8 +176,7 @@ func (o AddOperation) Apply() (interface{}, error) {
 		}
 		BatchUpdatePendingDataNodes(o.Infos)
 		BatchAddChunks(o.Infos)
-		err := UnlockFileNodesById(o.FileNodeId, false)
-		return nil, err
+		return nil, nil
 	default:
 		return nil, nil
 	}
@@ -297,4 +307,95 @@ func (o AllocateChunksOperation) Apply() (interface{}, error) {
 }
 
 type ExpandOperation struct {
+	Id           string              `json:"id"`
+	SenderPlan   map[string][]string `json:"sender_plan"`
+	ReceiverPlan string              `json:"receiver_plan"`
+	ChunkIds     []string            `json:"chunk_ids"`
+}
+
+func (e ExpandOperation) Apply() (interface{}, error) {
+	logrus.Infof("Apply expand operation with dataNode #%s", e.ReceiverPlan)
+	updateMapLock.Lock()
+	for fromNodeId, targetChunks := range e.SenderPlan {
+		fromNode := dataNodeMap[fromNodeId]
+		for _, chunkId := range targetChunks {
+			newFutureSendPlan := ChunkSendInfo{
+				ChunkId:    chunkId,
+				DataNodeId: e.ReceiverPlan,
+				SendType:   common.MoveSendType,
+			}
+			fromNode.FutureSendChunks[newFutureSendPlan] = common.WaitToInform
+		}
+	}
+	updateMapLock.Unlock()
+	updateChunksLock.Lock()
+	for _, chunkId := range e.ChunkIds {
+		if chunk, ok := chunksMap[chunkId]; ok {
+			chunk.pendingDataNodes.Add(e.ReceiverPlan)
+		}
+	}
+	updateChunksLock.Unlock()
+	return nil, nil
+}
+
+type CheckFileTreeOperation struct {
+	Id string `json:"id"`
+}
+
+func (t CheckFileTreeOperation) Apply() (interface{}, error) {
+	logrus.Infof("Start checking direcotry tree.")
+	queue := util.NewQueue[*FileNode]()
+	queue.Push(root)
+	for queue.Len() != 0 {
+		cur := queue.Pop()
+		if cur.IsDel && time.Now().Sub(*cur.DelTime).Hours() >= DayHour {
+			fileNodeIdSet.Remove(cur.Id)
+			if cur.ParentNode != nil {
+				logrus.Infof("Delete rubbish %s", cur.FileName)
+				delete(cur.ParentNode.ChildNodes, cur.FileName)
+			}
+		}
+		if cur.ChildNodes != nil && len(cur.ChildNodes) != 0 {
+			for _, node := range cur.ChildNodes {
+				if !fileNodeIdSet.Contains(cur.ParentNode.Id) {
+					fileNodeIdSet.Remove(node.Id)
+				}
+				queue.Push(node)
+			}
+		}
+	}
+	logrus.Infof("Check done.")
+	return nil, nil
+}
+
+type CheckChunksOperation struct {
+	Id string `json:"id"`
+}
+
+func (d CheckChunksOperation) Apply() (interface{}, error) {
+	logrus.Infof("Start cleaning up rubbish in dataMap and chunkMap.")
+	for _, node := range dataNodeMap {
+		logrus.Debugf("chunks %s in dataNode %s", node.Chunks.String(), node.Id)
+		for _, chunkId := range node.Chunks.ToSlice() {
+			fileNodeId := strings.Split(chunkId.(string), common.ChunkIdDelimiter)[0]
+			if !fileNodeIdSet.Contains(fileNodeId) {
+				logrus.Debugf("Find rubbish chunk %s in dataNode %s", chunkId, node.Id)
+				node.FutureSendChunks[ChunkSendInfo{
+					ChunkId:    chunkId.(string),
+					DataNodeId: "",
+					SendType:   common.DeleteSendType,
+				}] = common.WaitToInform
+				logrus.Debugf("remove this chunk")
+				node.Chunks.Remove(chunkId)
+			}
+		}
+	}
+	for id := range chunksMap {
+		fileNodeId := strings.Split(id, common.ChunkIdDelimiter)[0]
+		if !fileNodeIdSet.Contains(fileNodeId) {
+			delete(chunksMap, id)
+		}
+	}
+	logrus.Infof("Clean up done.")
+	return nil, nil
 }

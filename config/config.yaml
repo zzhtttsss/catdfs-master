@@ -3,6 +3,8 @@ master:
   rpcPort: ":9099"
   raftPort: "2345"
   raftDir: "./raftData"
+  cleanupTime: 86400
+  directoryCheckTime: 86200
 
 # chunk server config
 chunk:

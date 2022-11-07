@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 	"tinydfs-base/common"
+	"tinydfs-base/protocol/pb"
 	"tinydfs-base/util"
 )
 
@@ -191,17 +192,22 @@ func UpdateDataNode4Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 		return nil, false
 	}
 	dataNode.HeartbeatTime = time.Now()
-	dataNode.status = common.Alive
+	if o.IsReady {
+		dataNode.status = common.Alive
+	}
 	dataNode.IOLoad = int(o.IOLoad)
 	for _, info := range o.SuccessInfos {
 		delete(dataNode.FutureSendChunks, info)
-		dataNodeMap[info.DataNodeId].Chunks.Add(info.ChunkId)
+		if dataNodeS, ok := dataNodeMap[info.DataNodeId]; ok {
+			dataNodeS.Chunks.Add(info.ChunkId)
+		}
 	}
 	for _, info := range o.FailInfos {
 		delete(dataNode.FutureSendChunks, info)
 		pendingChunkQueue.Push(String(info.ChunkId))
 	}
 	nextChunkInfos := make([]ChunkSendInfo, 0, len(dataNode.FutureSendChunks))
+	logrus.Debugf("[dataNode=%s] FutureSendChunks %v", dataNode.Id, dataNode.FutureSendChunks)
 	for info, i := range dataNode.FutureSendChunks {
 		if i != common.WaitToSend {
 			nextChunkInfos = append(nextChunkInfos, info)
@@ -216,9 +222,13 @@ func GetSortedDataNodeIds(set set.Set) ([]string, []string) {
 	defer updateMapLock.RUnlock()
 	setChan := set.Iter()
 
-	dns := make([]*DataNode, 0, set.Cardinality())
+	dns := make([]*DataNode, 0)
 	for id := range setChan {
-		dns = append(dns, dataNodeMap[id.(string)])
+		if node, ok := dataNodeMap[id.(string)]; ok {
+			if node.status == common.Alive {
+				dns = append(dns, dataNodeMap[id.(string)])
+			}
+		}
 	}
 	sort.SliceStable(dns, func(i, j int) bool {
 		if dns[i].IOLoad < dns[j].IOLoad {
@@ -252,7 +262,10 @@ func GetDataNodeAddresses(chunkSendInfos []ChunkSendInfo) []string {
 	defer updateMapLock.RUnlock()
 	adds := make([]string, 0, len(dataNodeMap))
 	for _, info := range chunkSendInfos {
-		adds = append(adds, dataNodeMap[info.DataNodeId].Address)
+		if node, ok := dataNodeMap[info.DataNodeId]; ok {
+			adds = append(adds, node.Address)
+		}
+
 	}
 	return adds
 }
@@ -265,6 +278,7 @@ func BatchApplyPlan2DataNode(receiverPlan []int, senderPlan []int, chunkIds []st
 		chunkSendInfo := ChunkSendInfo{
 			ChunkId:    chunkIds[i],
 			DataNodeId: dataNodeIds[receiverPlan[i]],
+			SendType:   common.CopySendType,
 		}
 		dataNodeMap[dataNodeIds[dnIndex]].FutureSendChunks[chunkSendInfo] = common.WaitToInform
 	}
@@ -285,6 +299,31 @@ func BatchAddChunks(infos []util.ChunkSendResult) {
 type ChunkSendInfo struct {
 	ChunkId    string `json:"chunk_id"`
 	DataNodeId string `json:"data_node_id"`
+	SendType   int    `json:"send_type"`
+}
+
+func ConvChunkInfo(chunkInfos []*pb.ChunkInfo) []ChunkSendInfo {
+	chunkSendInfos := make([]ChunkSendInfo, len(chunkInfos))
+	for i := 0; i < len(chunkInfos); i++ {
+		chunkSendInfos[i] = ChunkSendInfo{
+			ChunkId:    chunkInfos[i].ChunkId,
+			DataNodeId: chunkInfos[i].DataNodeId,
+			SendType:   int(chunkInfos[i].SendType),
+		}
+	}
+	return chunkSendInfos
+}
+
+func DeConvChunkInfo(chunkSendInfos []ChunkSendInfo) []*pb.ChunkInfo {
+	chunkInfos := make([]*pb.ChunkInfo, len(chunkSendInfos))
+	for i := 0; i < len(chunkInfos); i++ {
+		chunkInfos[i] = &pb.ChunkInfo{
+			ChunkId:    chunkSendInfos[i].ChunkId,
+			DataNodeId: chunkSendInfos[i].DataNodeId,
+			SendType:   int32(chunkSendInfos[i].SendType),
+		}
+	}
+	return chunkInfos
 }
 
 // DegradeDataNode degrade a DataNode based on given stage. If DataNode is dead,
@@ -447,4 +486,72 @@ func RestoreDataNodes(buf *bufio.Scanner) error {
 		}
 	}
 	return nil
+}
+
+// IsNeed2Expand finds out whether to expand.
+func IsNeed2Expand(newChunkNum int) bool {
+	avgChunkNum := GetAvgChunkNum()
+	diff := avgChunkNum - newChunkNum
+	// TODO 磁盘占有率
+	return diff > 1
+}
+
+func GetAvgChunkNum() int {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	if len(dataNodeMap) == 0 {
+		return 0
+	}
+	count := 0
+	for _, node := range dataNodeMap {
+		count += node.Chunks.Cardinality()
+	}
+	avgChunkNum := count / len(dataNodeMap)
+	return avgChunkNum
+}
+
+// DoExpand gets the chunk copied according to this new dataNode.
+func DoExpand(dataNode *DataNode) int {
+	logrus.Infof("Start to expand with dataNode %s", dataNode.Id)
+	var (
+		pendingCount  = GetAvgChunkNum()
+		selfChunks    = dataNode.Chunks
+		pendingChunks = set.NewSet()
+		pendingMap    = map[string][]string{}
+	)
+For:
+	for {
+		notFound := true
+		for _, node := range dataNodeMap {
+			if node.status == common.Alive {
+				for chunk := range node.Chunks.Iter() {
+					if !pendingChunks.Contains(chunk) && !selfChunks.Contains(chunk) {
+						notFound = false
+						pendingChunks.Add(chunk)
+						if pendingDataNodeChunks, ok := pendingMap[node.Id]; ok {
+							pendingDataNodeChunks = append(pendingDataNodeChunks, chunk.(string))
+						} else {
+							pendingMap[node.Id] = []string{chunk.(string)}
+						}
+						if pendingChunks.Cardinality() == pendingCount {
+							break For
+						}
+						break
+					}
+				}
+			}
+		}
+		if notFound {
+			break
+		}
+	}
+	expandOperation := &ExpandOperation{
+		Id:           util.GenerateUUIDString(),
+		SenderPlan:   pendingMap,
+		ReceiverPlan: dataNode.Id,
+		ChunkIds:     util.Interfaces2TypeArr[string](pendingChunks.ToSlice()),
+	}
+	data := getData4Apply(expandOperation, common.OperationExpand)
+	GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+	return pendingChunks.Cardinality()
 }

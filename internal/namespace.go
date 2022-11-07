@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"container/list"
 	"fmt"
+	mapset "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
 	"github.com/sirupsen/logrus"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"tinydfs-base/common"
 	"tinydfs-base/util"
@@ -26,7 +26,6 @@ const (
 	isFileIdx
 	delTimeIdx
 	isDelIdx
-	lastLockTimeIdx
 )
 
 const (
@@ -42,16 +41,12 @@ var (
 	// the entry. Access to this node must also be via the provided public methods
 	// in this file.
 	root = &FileNode{
-		Id:             util.GenerateUUIDString(),
-		FileName:       rootFileName,
-		ChildNodes:     make(map[string]*FileNode),
-		UpdateNodeLock: &sync.RWMutex{},
+		Id:         util.GenerateUUIDString(),
+		FileName:   rootFileName,
+		ChildNodes: make(map[string]*FileNode),
 	}
-	// lockedFileNodes includes all locked nodes. All nodes locked by an operation
-	// will be placed on a stack as the value of the map. The id of the FileNode
-	// being operated is used as the key.
-	lockedFileNodes  = make(map[string]*list.List)
-	fileNodesMapLock = &sync.Mutex{}
+	// fileNodeIdSet includes all fileNode id stored in the root.
+	fileNodeIdSet = mapset.NewSet()
 )
 
 // FileNode represents a file or directory in the file system.
@@ -69,106 +64,49 @@ type FileNode struct {
 	IsFile bool
 	// DelTime represents the last time this FileNode was deleted. It is used to
 	// determine whether this FileNode can be permanently deleted.
-	DelTime        *time.Time
-	IsDel          bool
-	UpdateNodeLock *sync.RWMutex
-	// LastLockTime represents the last time this FileNode was locked. It is used
-	// to determine whether active unlocking is required.
-	LastLockTime time.Time
+	DelTime *time.Time
+	IsDel   bool
 }
 
 // CheckAndGetFileNode gets a FileNode by given path if the given path is legal.
 func CheckAndGetFileNode(path string) (*FileNode, error) {
-	fileNode, stack, isExist := getAndLockByPath(path, true)
+	fileNode, isExist := getFileNode(path)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-	defer unlockAllMutex(stack, true)
 	return fileNode, nil
 }
 
-// getAndLockByPath gets target FileNode and lock all FileNode from the root to
-// target FileNode by given path. The type of target node being locked depends
-// on the isRead parameter; all the other FileNode will be locked as read lock.
-func getAndLockByPath(path string, isRead bool) (*FileNode, *list.List, bool) {
+// getAndLockByPath gets target FileNode.
+func getFileNode(path string) (*FileNode, bool) {
 	currentNode := root
 	path = strings.Trim(path, pathSplitString)
 	fileNames := strings.Split(path, pathSplitString)
-	stack := list.New()
-
 	if path == root.FileName {
-		if isRead {
-			currentNode.UpdateNodeLock.RLock()
-		} else {
-			currentNode.UpdateNodeLock.Lock()
-		}
-		currentNode.LastLockTime = time.Now()
-		stack.PushBack(currentNode)
-		return currentNode, stack, true
+		return currentNode, true
 	}
 
 	for _, name := range fileNames {
-		currentNode.UpdateNodeLock.RLock()
-		currentNode.LastLockTime = time.Now()
-		stack.PushBack(currentNode)
 		nextNode, exist := currentNode.ChildNodes[name]
 		if !exist {
-			unlockAllMutex(stack, true)
-			return nil, stack, false
+			return nil, false
+		}
+		if nextNode.IsDel {
+			return nil, false
 		}
 		currentNode = nextNode
 	}
-
-	if isRead {
-		currentNode.UpdateNodeLock.RLock()
-	} else {
-		currentNode.UpdateNodeLock.Lock()
-	}
-	stack.PushBack(currentNode)
-	return currentNode, stack, true
-}
-
-// unlockAllMutex unlocks all FileNode in the given stack.
-func unlockAllMutex(stack *list.List, isRead bool) {
-	firstElement := stack.Back()
-	firstNode := firstElement.Value.(*FileNode)
-	if isRead {
-		firstNode.UpdateNodeLock.RUnlock()
-	} else {
-		firstNode.UpdateNodeLock.Unlock()
-	}
-	stack.Remove(firstElement)
-
-	for stack.Len() != 0 {
-		element := stack.Back()
-		node := element.Value.(*FileNode)
-		node.UpdateNodeLock.RUnlock()
-		stack.Remove(element)
-	}
-}
-
-// UnlockFileNodesById gets stack by fileNodeId and unlock all FileNode in that stack.
-func UnlockFileNodesById(fileNodeId string, isRead bool) error {
-	fileNodesMapLock.Lock()
-	stack, ok := lockedFileNodes[fileNodeId]
-	fileNodesMapLock.Unlock()
-	if !ok {
-		logrus.Errorf("fail to find stack by FileNodeId : %s", fileNodeId)
-		return fmt.Errorf("fail to find stack by FileNodeId : %s", fileNodeId)
-	}
-	unlockAllMutex(stack, isRead)
-	return nil
+	return currentNode, true
 }
 
 // AddFileNode add a FileNode to directory tree. It is generally used to add a
 // directory because it will unlock all FileNode after adding the FileNode to
 // directory tree.
 func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNode, error) {
-	fileNode, stack, isExist := getAndLockByPath(path, false)
+	fileNode, isExist := getFileNode(path)
 	if !isExist || fileNode.IsFile {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-	defer unlockAllMutex(stack, false)
 
 	if _, ok := fileNode.ChildNodes[filename]; ok {
 		return nil, fmt.Errorf("target path already has file with the same name, path : %s", path)
@@ -176,16 +114,15 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 
 	id := util.GenerateUUIDString()
 	newNode := &FileNode{
-		Id:             id,
-		FileName:       filename,
-		ParentNode:     fileNode,
-		Size:           size,
-		IsFile:         isFile,
-		IsDel:          false,
-		DelTime:        nil,
-		UpdateNodeLock: &sync.RWMutex{},
-		LastLockTime:   time.Now(),
+		Id:         id,
+		FileName:   filename,
+		ParentNode: fileNode,
+		Size:       size,
+		IsFile:     isFile,
+		IsDel:      false,
+		DelTime:    nil,
 	}
+	fileNodeIdSet.Add(newNode.Id)
 	if isFile {
 		newNode.Chunks = initChunks(size, id)
 	} else {
@@ -193,38 +130,6 @@ func AddFileNode(path string, filename string, size int64, isFile bool) (*FileNo
 	}
 	fileNode.ChildNodes[filename] = newNode
 	return newNode, nil
-}
-
-// LockAndAddFileNode add a FileNode to directory tree without unlock any FileNode.
-// It is generally used to add a file. After calling this method, we must call
-// UnlockFileNodesById to unlock all FileNode.
-func LockAndAddFileNode(id string, path string, filename string, size int64, isFile bool) (*FileNode, *list.List, error) {
-	fileNode, stack, isExist := getAndLockByPath(path, false)
-	if !isExist || fileNode.IsFile {
-		return nil, nil, fmt.Errorf("path not exist, path : %s", path)
-	}
-	if _, ok := fileNode.ChildNodes[filename]; ok {
-		unlockAllMutex(stack, false)
-		return nil, nil, fmt.Errorf("target path already has file with the same name, path : %s", path)
-	}
-	newNode := &FileNode{
-		Id:             id,
-		FileName:       filename,
-		ParentNode:     fileNode,
-		Size:           size,
-		IsFile:         isFile,
-		IsDel:          false,
-		DelTime:        nil,
-		UpdateNodeLock: &sync.RWMutex{},
-		LastLockTime:   time.Now(),
-	}
-	if isFile {
-		newNode.Chunks = initChunks(size, id)
-	} else {
-		newNode.ChildNodes = make(map[string]*FileNode)
-	}
-	fileNode.ChildNodes[filename] = newNode
-	return newNode, stack, nil
 }
 
 func initChunks(size int64, id string) []string {
@@ -238,16 +143,14 @@ func initChunks(size int64, id string) []string {
 
 // MoveFileNode move a FileNode to target path.
 func MoveFileNode(currentPath string, targetPath string) (*FileNode, error) {
-	fileNode, stack, isExist := getAndLockByPath(currentPath, false)
-	newParentNode, parentStack, isParentExist := getAndLockByPath(targetPath, false)
+	fileNode, isExist := getFileNode(currentPath)
+	newParentNode, isParentExist := getFileNode(targetPath)
 	if !isExist {
 		return nil, fmt.Errorf("current path not exist, path : %s", currentPath)
 	}
-	defer unlockAllMutex(stack, false)
 	if !isParentExist {
 		return nil, fmt.Errorf("target path not exist, path : %s", targetPath)
 	}
-	defer unlockAllMutex(parentStack, false)
 	if newParentNode.ChildNodes[fileNode.FileName] != nil {
 		return nil, fmt.Errorf("target path already has file with the same name, filename : %s", fileNode.FileName)
 	}
@@ -275,11 +178,10 @@ func EraseFileNode(path string) (*FileNode, error) {
 }
 
 func removeFileNode(path string, isDummy bool) (*FileNode, error) {
-	fileNode, stack, isExist := getAndLockByPath(path, false)
+	fileNode, isExist := getFileNode(path)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-	defer unlockAllMutex(stack, false)
 
 	delete(fileNode.ParentNode.ChildNodes, fileNode.FileName)
 	fileNode.FileName = deleteFilePrefix + fileNode.Id + deleteDelimiter + fileNode.FileName
@@ -297,11 +199,10 @@ func removeFileNode(path string, isDummy bool) (*FileNode, error) {
 // ListFileNode get a slice including all FileNode under the specified path.
 // The path must be a directory not a file.
 func ListFileNode(path string) ([]*FileNode, error) {
-	fileNode, stack, isExist := getAndLockByPath(path, true)
+	fileNode, isExist := getFileNode(path)
 	if !isExist || fileNode.IsFile {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-	defer unlockAllMutex(stack, true)
 
 	fileNodes := make([]*FileNode, len(fileNode.ChildNodes))
 	nodeIndex := 0
@@ -314,11 +215,10 @@ func ListFileNode(path string) ([]*FileNode, error) {
 
 // RenameFileNode rename a FileNode to given name.
 func RenameFileNode(path string, newName string) (*FileNode, error) {
-	fileNode, stack, isExist := getAndLockByPath(path, false)
+	fileNode, isExist := getFileNode(path)
 	if !isExist {
 		return nil, fmt.Errorf("path not exist, path : %s", path)
 	}
-	defer unlockAllMutex(stack, false)
 
 	delete(fileNode.ParentNode.ChildNodes, fileNode.FileName)
 	fileNode.FileName = newName
@@ -341,13 +241,13 @@ func (f *FileNode) String() string {
 		childrenIds = append(childrenIds, n.Id)
 	}
 	if f.ParentNode == nil {
-		res.WriteString(fmt.Sprintf("%s$%s$%s$%v$%s$%d$%v$%v$%v$%s\n",
+		res.WriteString(fmt.Sprintf("%s$%s$%s$%v$%s$%d$%v$%v$%v\n",
 			f.Id, f.FileName, common.MinusOneString, childrenIds, f.Chunks,
-			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(common.LogFileTimeFormat)))
+			f.Size, f.IsFile, f.DelTime, f.IsDel))
 	} else {
-		res.WriteString(fmt.Sprintf("%s$%s$%s$%v$%s$%d$%v$%v$%v$%s\n",
+		res.WriteString(fmt.Sprintf("%s$%s$%s$%v$%s$%d$%v$%v$%v\n",
 			f.Id, f.FileName, f.ParentNode.Id, childrenIds, f.Chunks,
-			f.Size, f.IsFile, f.DelTime, f.IsDel, f.LastLockTime.Format(common.LogFileTimeFormat)))
+			f.Size, f.IsFile, f.DelTime, f.IsDel))
 
 	}
 
@@ -468,21 +368,21 @@ func ReadDirTree(buf *bufio.Scanner) map[string]*FileNode {
 			delTimePtr = &delTime
 		}
 		isDel, _ := strconv.ParseBool(data[isDelIdx])
-		lastLockTime, _ := time.Parse(common.LogFileTimeFormat, data[lastLockTimeIdx])
+		if isDel && time.Now().Sub(delTime).Hours() > 23 {
+			continue
+		}
 		fn := &FileNode{
 			Id:       data[FileNodeIdIdx],
 			FileName: data[fileNameIdx],
 			ParentNode: &FileNode{
 				Id: data[parentIdIdx],
 			},
-			ChildNodes:     children,
-			Chunks:         chunks,
-			Size:           int64(size),
-			IsFile:         isFile,
-			DelTime:        delTimePtr,
-			IsDel:          isDel,
-			UpdateNodeLock: &sync.RWMutex{},
-			LastLockTime:   lastLockTime,
+			ChildNodes: children,
+			Chunks:     chunks,
+			Size:       int64(size),
+			IsFile:     isFile,
+			DelTime:    delTimePtr,
+			IsDel:      isDel,
 		}
 		res[fn.Id] = fn
 	}
@@ -519,6 +419,7 @@ func buildTree(cur *FileNode, nodeMap map[string]*FileNode) {
 		delete(cur.ChildNodes, id)
 		cur.ChildNodes[node.FileName] = node
 		node.ParentNode = cur
+		fileNodeIdSet.Add(node.Id)
 		buildTree(node, nodeMap)
 	}
 }
