@@ -33,6 +33,13 @@ const (
 )
 
 var GlobalMasterHandler *MasterHandler
+var Logger *logrus.Logger
+
+func init() {
+	config.InitConfig()
+	Logger = config.InitLogger(Logger, true)
+
+}
 
 // MasterHandler represent a master node to handle all incoming requests.
 type MasterHandler struct {
@@ -69,7 +76,6 @@ type MasterHandler struct {
 // CreateMasterHandler create a global MasterHandler.
 func CreateMasterHandler() {
 	var err error
-	config.InitConfig()
 	GlobalMasterHandler = &MasterHandler{
 		FSM: &MasterFSM{},
 	}
