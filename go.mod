@@ -3,6 +3,7 @@ module tinydfs-master
 go 1.18
 
 require (
+	github.com/agiledragon/gomonkey v2.0.2+incompatible
 	github.com/deckarep/golang-set v1.8.0
 	github.com/hashicorp/go-hclog v1.2.0
 	github.com/hashicorp/raft v1.3.10
@@ -18,6 +19,7 @@ require (
 )
 
 require (
+	github.com/agiledragon/gomonkey/v2 v2.9.0 // indirect
 	github.com/armon/go-metrics v0.3.10 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/boltdb/bolt v1.3.1 // indirect
@@ -63,6 +65,8 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0 // indirect
 )
+
+replace github.com/agiledragon/gomonkey => github.com/agiledragon/gomonkey/v2 v2.8.0
 
 //replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20221104070207-26c4866f8c48
 

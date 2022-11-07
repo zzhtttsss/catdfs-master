@@ -143,10 +143,10 @@ func (o AddOperation) Apply() (interface{}, error) {
 				dnIds         = make([]string, len(dataNodes[0]))
 				dnAdds        = make([]string, len(dataNodes[0]))
 			)
-			for i, node := range dataNodes[i] {
+			for j, node := range dataNodes[i] {
 				dataNodeIdSet.Add(node.Id)
-				dnIds[i] = node.Id
-				dnAdds[i] = node.Address
+				dnIds[j] = node.Id
+				dnAdds[j] = node.Address
 			}
 			chunk := &Chunk{
 				Id:               chunkId,
