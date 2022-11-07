@@ -2,11 +2,9 @@ package internal
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	set "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"go.uber.org/atomic"
 	"math"
@@ -246,32 +244,6 @@ func RestorePendingChunkQueue(buf *bufio.Scanner) error {
 	return nil
 }
 
-// MonitorPendingChunk runs in a goroutine. This function will keep looping to
-// check the pendingChunkQueue, there are 3 situations:
-// 1. The timer is up, allocate all pending chunks in the pendingChunkQueue.
-// 2. The lengths of the pendingChunkQueue is greater than or equal to the quantity
-//    of a batch, allocate a batch of pending chunks in the pendingChunkQueue.
-// 3. None of the above conditions are met，just do nothing.
-func MonitorPendingChunk(ctx context.Context) {
-	if pendingChunkQueue.Len() > 0 {
-		BatchAllocateChunks()
-	}
-	timer := time.NewTicker(time.Duration(viper.GetInt(common.ChunkDeadChunkCheckTime)) * time.Second)
-	for {
-		select {
-		case <-timer.C:
-			BatchAllocateChunks()
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		default:
-			if pendingChunkQueue.Len() >= viper.GetInt(common.ChunkDeadChunkCopyThreshold) {
-				BatchAllocateChunks()
-			}
-		}
-	}
-}
-
 // BatchAllocateChunks runs in a goroutine. It will get a batch of Chunk from
 // pendingChunkQueue and the best plan which allocate a target DataNode to
 // store for each Chunk.
@@ -282,7 +254,7 @@ func MonitorPendingChunk(ctx context.Context) {
 //    of every Chunk to make the number of Chunk received and send by each DataNode
 //    as balanced as possible(use variance to measure).
 func BatchAllocateChunks() {
-	logrus.Infof("Start to allocate a batch of chunks.")
+	Logger.Infof("Start to allocate a batch of chunks.")
 	if pendingChunkQueue.Len() != 0 {
 		batchChunkIds := getPendingChunks()
 		chunkIds := BatchFilterChunk(batchChunkIds)
@@ -296,8 +268,8 @@ func BatchAllocateChunks() {
 			}
 		}
 		senderPlan := allocateChunksDFS(len(chunkIds), len(dataNodeIds), isStore)
-		logrus.Debugf("Receiver plan is %v", receiverPlan)
-		logrus.Debugf("Sender plan is %v", senderPlan)
+		Logger.Debugf("Receiver plan is %v", receiverPlan)
+		Logger.Debugf("Sender plan is %v", senderPlan)
 		operation := &AllocateChunksOperation{
 			Id:           util.GenerateUUIDString(),
 			SenderPlan:   senderPlan,
@@ -309,10 +281,10 @@ func BatchAllocateChunks() {
 		data := getData4Apply(operation, common.OperationAllocateChunks)
 		applyFuture := GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
 		if err := applyFuture.Error(); err != nil {
-			logrus.Errorf("Fail to allocate a batch of chunks, error detail: %s,", err.Error())
+			Logger.Errorf("Fail to allocate a batch of chunks, error detail: %s,", err.Error())
 		}
 	}
-	logrus.Infof("Suceess to allocate a batch of chunks.")
+	Logger.Infof("Suceess to allocate a batch of chunks.")
 }
 
 // ApplyAllocatePlan will apply the given allocating plan. It will:
@@ -418,6 +390,7 @@ func dfs(chunkNum int, dataNodeNum int, chunkIndex int, dnIndex int, currentResu
 			}
 
 		}
+		// If the best plan has been found， just stop dfs and return the result.
 		if currentValue == bestVariance {
 			return true
 		}
