@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/agiledragon/gomonkey v2.0.2+incompatible
+	github.com/agiledragon/gomonkey/v2 v2.9.0
 	github.com/deckarep/golang-set v1.8.0
 	github.com/hashicorp/go-hclog v1.2.0
 	github.com/hashicorp/raft v1.3.10
@@ -19,7 +20,6 @@ require (
 )
 
 require (
-	github.com/agiledragon/gomonkey/v2 v2.9.0 // indirect
 	github.com/armon/go-metrics v0.3.10 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/boltdb/bolt v1.3.1 // indirect
@@ -36,6 +36,8 @@ require (
 	github.com/hashicorp/go-msgpack v0.5.5 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
+	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible // indirect
+	github.com/lestrrat-go/strftime v1.0.6 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
@@ -43,10 +45,12 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.1 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.26.0 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect
+	github.com/rifflock/lfshook v0.0.0-20180920164130-b9218ef580f5 // indirect
 	github.com/spf13/afero v1.8.2 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
@@ -68,6 +72,6 @@ require (
 
 replace github.com/agiledragon/gomonkey => github.com/agiledragon/gomonkey/v2 v2.8.0
 
-//replace tinydfs-base => github.com/zzhtttsss/tinydfs-base v0.0.0-20221104070207-26c4866f8c48
+replace tinydfs-base => github.com/zzhtttsss/catdfs-base v0.0.0-20221107115238-e0b9bf134962
 
-replace tinydfs-base => ../catdfs-base
+//replace tinydfs-base => ../catdfs-base
