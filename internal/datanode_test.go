@@ -58,14 +58,14 @@ func TestMain(m *testing.M) {
 }
 
 type stu struct {
-	a mapset.Set
+	a set.Set
 	b map[ChunkSendInfo]int
 }
 
 func TestGetDataNode2MoveChunk(t *testing.T) {
 	mm := map[*stu]int{}
 	aa := &stu{
-		a: mapset.NewSet("aa"),
+		a: set.NewSet("aa"),
 		b: map[ChunkSendInfo]int{
 			ChunkSendInfo{
 				ChunkId:    "sdf",

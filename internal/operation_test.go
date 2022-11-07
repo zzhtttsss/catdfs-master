@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"container/list"
 	"fmt"
 	"github.com/agiledragon/gomonkey"
 	"github.com/stretchr/testify/assert"
@@ -76,16 +75,15 @@ func TestAddOperation_Apply(t *testing.T) {
 				},
 			},
 			Setup: func(t *testing.T) {
-				lockAndAddFileNode := gomonkey.ApplyFunc(LockAndAddFileNode, func(_ string, _ string, _ string,
-					_ int64, _ bool) (*FileNode, *list.List, error) {
+				addFileNode := gomonkey.ApplyFunc(AddFileNode, func(_ string, _ string, _ string,
+					_ int64, _ bool) (*FileNode, error) {
 					return &FileNode{
 						Id:     "fileNode1",
 						Chunks: []string{"chunk1", "chunk2"},
-					}, &list.List{}, nil
+					}, nil
 				})
 				t.Cleanup(func() {
-					lockAndAddFileNode.Reset()
-					lockedFileNodes = make(map[string]*list.List)
+					addFileNode.Reset()
 				})
 			},
 			wantErr: nil,
@@ -140,7 +138,6 @@ func TestAddOperation_Apply(t *testing.T) {
 				t.Cleanup(func() {
 					batchAllocateDataNodes.Reset()
 					batchAddChunk.Reset()
-					lockedFileNodes = make(map[string]*list.List)
 				})
 			},
 			wantErr: nil,
