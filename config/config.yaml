@@ -12,7 +12,7 @@ master:
   #	InfoLevel = 4
   #	DebugLevel = 5
   #	TraceLevel = 6
-  logLevel: 4
+  logLevel: 5
 
 # chunk server config
 chunk:
