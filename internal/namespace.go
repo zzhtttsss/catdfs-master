@@ -6,7 +6,6 @@ import (
 	"fmt"
 	mapset "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
-	"github.com/sirupsen/logrus"
 	"math"
 	"sort"
 	"strconv"
@@ -299,7 +298,7 @@ func PersistDirTree(sink raft.SnapshotSink) error {
 		queue.Remove(cur)
 		node, ok := cur.Value.(*FileNode)
 		if !ok {
-			logrus.Warnf("Fail to convert element to FileNode")
+			Logger.Warnf("Fail to convert element to FileNode.")
 		}
 		_, err := sink.Write([]byte(node.String()))
 		if err != nil {
@@ -318,10 +317,8 @@ func PersistDirTree(sink raft.SnapshotSink) error {
 
 // RestoreDirTree restore the directory tree from buf.
 func RestoreDirTree(buf *bufio.Scanner) error {
-	logrus.Println("Start to restore directory tree.")
 	rootMap := ReadDirTree(buf)
 	if rootMap != nil && len(rootMap) != 0 {
-		logrus.Println("Start to Deserialize directory tree.")
 		root = RootDeserialize(rootMap)
 	}
 	return nil

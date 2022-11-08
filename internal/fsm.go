@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"github.com/hashicorp/raft"
-	"github.com/sirupsen/logrus"
 	"io"
 	"reflect"
 )
@@ -78,27 +77,28 @@ type snapshot struct {
 
 // Persist Take a snapshot of current metadata and save it as a file.
 func (s *snapshot) Persist(sink raft.SnapshotSink) error {
-	logrus.Infof("Start to persist a snapshot.")
+	Logger.Infof("Start to persist a snapshot of metadata.")
 	err := PersistDirTree(sink)
 	if err != nil {
-		logrus.Errorf("Fail to persist directory tree, error detail: %s", err.Error())
+		Logger.Errorf("Fail to persist directory tree, error detail: %s", err.Error())
 		return err
 	}
 	err = PersistDataNodes(sink)
 	if err != nil {
-		logrus.Errorf("Fail to persist datanodes, error detail: %s", err.Error())
+		Logger.Errorf("Fail to persist datanodes, error detail: %s", err.Error())
 		return err
 	}
 	err = PersistChunks(sink)
 	if err != nil {
-		logrus.Errorf("Fail to persist chunks, error detail: %s", err.Error())
+		Logger.Errorf("Fail to persist chunks, error detail: %s", err.Error())
 		return err
 	}
 	err = PersistPendingChunkQueue(sink)
 	if err != nil {
-		logrus.Errorf("Fail to persist pending chunk queue, error detail: %s", err.Error())
+		Logger.Errorf("Fail to persist pending chunk queue, error detail: %s", err.Error())
 		return err
 	}
+	Logger.Infof("Success to persist a snapshot of metadata.")
 	return sink.Close()
 }
 

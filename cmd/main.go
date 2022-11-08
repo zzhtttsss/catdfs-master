@@ -13,11 +13,8 @@ const (
 	MetricsServerPort = "9101"
 )
 
-func init() {
-	internal.CreateMasterHandler()
-}
-
 func main() {
+	internal.CreateMasterHandler()
 	go internal.GlobalMasterHandler.Server()
 	http.Handle("/metrics", promhttp.HandlerFor(
 		prometheus.DefaultGatherer,

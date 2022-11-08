@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	set "github.com/deckarep/golang-set"
-	"github.com/sirupsen/logrus"
 	"reflect"
 	"strconv"
 	"strings"
@@ -65,7 +64,7 @@ type RegisterOperation struct {
 }
 
 func (o RegisterOperation) Apply() (interface{}, error) {
-	logrus.Infof("register, address: %s", o.Address)
+	Logger.Infof("Register, address: %s", o.Address)
 	newSet := set.NewSet()
 	for _, id := range o.ChunkIds {
 		newSet.Add(id)
@@ -84,7 +83,7 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 		FutureSendChunks: make(map[ChunkSendInfo]int),
 	}
 	AddDataNode(datanode)
-	logrus.Infof("[Id=%s] Connected, status %v", o.DataNodeId, status)
+	Logger.Infof("[Id = %s] Connected, status %v", o.DataNodeId, status)
 	return o.DataNodeId, nil
 }
 
@@ -144,17 +143,17 @@ func (o AddOperation) Apply() (interface{}, error) {
 				dnIds         = make([]string, len(dataNodes[0]))
 				dnAdds        = make([]string, len(dataNodes[0]))
 			)
-			for i, node := range dataNodes[i] {
+			for j, node := range dataNodes[i] {
 				dataNodeIdSet.Add(node.Id)
-				dnIds[i] = node.Id
-				dnAdds[i] = node.Address
+				dnIds[j] = node.Id
+				dnAdds[j] = node.Address
 			}
 			chunk := &Chunk{
 				Id:               chunkId,
 				dataNodes:        set.NewSet(),
 				pendingDataNodes: dataNodeIdSet,
 			}
-			logrus.Debugf("Chunk index: %v, dnIds: %v, dnAdds: %v", i, dnIds, dnAdds)
+			Logger.Debugf("Chunk index: %v, dnIds: %v, dnAdds: %v", i, dnIds, dnAdds)
 			chunks[i] = chunk
 			dataNodeIds[i] = &pb.GetDataNodes4AddReply_Array{
 				Items: dnIds,
@@ -314,7 +313,7 @@ type ExpandOperation struct {
 }
 
 func (e ExpandOperation) Apply() (interface{}, error) {
-	logrus.Infof("Apply expand operation with dataNode #%s", e.ReceiverPlan)
+	Logger.Infof("Apply expand operation with dataNode %s", e.ReceiverPlan)
 	updateMapLock.Lock()
 	for fromNodeId, targetChunks := range e.SenderPlan {
 		fromNode := dataNodeMap[fromNodeId]
@@ -343,7 +342,7 @@ type CheckFileTreeOperation struct {
 }
 
 func (t CheckFileTreeOperation) Apply() (interface{}, error) {
-	logrus.Infof("Start checking direcotry tree.")
+	Logger.Infof("Start to check direcotry tree.")
 	queue := util.NewQueue[*FileNode]()
 	queue.Push(root)
 	for queue.Len() != 0 {
@@ -351,7 +350,7 @@ func (t CheckFileTreeOperation) Apply() (interface{}, error) {
 		if cur.IsDel && time.Now().Sub(*cur.DelTime).Hours() >= DayHour {
 			fileNodeIdSet.Remove(cur.Id)
 			if cur.ParentNode != nil {
-				logrus.Infof("Delete rubbish %s", cur.FileName)
+				Logger.Debugf("Delete FileNode %s", cur.FileName)
 				delete(cur.ParentNode.ChildNodes, cur.FileName)
 			}
 		}
@@ -364,7 +363,7 @@ func (t CheckFileTreeOperation) Apply() (interface{}, error) {
 			}
 		}
 	}
-	logrus.Infof("Check done.")
+	Logger.Infof("Check done.")
 	return nil, nil
 }
 
@@ -373,19 +372,17 @@ type CheckChunksOperation struct {
 }
 
 func (d CheckChunksOperation) Apply() (interface{}, error) {
-	logrus.Infof("Start cleaning up rubbish in dataMap and chunkMap.")
+	Logger.Infof("Start to clean up rubbish in dataMap and chunkMap.")
 	for _, node := range dataNodeMap {
-		logrus.Debugf("chunks %s in dataNode %s", node.Chunks.String(), node.Id)
 		for _, chunkId := range node.Chunks.ToSlice() {
 			fileNodeId := strings.Split(chunkId.(string), common.ChunkIdDelimiter)[0]
 			if !fileNodeIdSet.Contains(fileNodeId) {
-				logrus.Debugf("Find rubbish chunk %s in dataNode %s", chunkId, node.Id)
+				Logger.Debugf("Find rubbish chunk %s in dataNode %s", chunkId, node.Id)
 				node.FutureSendChunks[ChunkSendInfo{
 					ChunkId:    chunkId.(string),
 					DataNodeId: "",
 					SendType:   common.DeleteSendType,
 				}] = common.WaitToInform
-				logrus.Debugf("remove this chunk")
 				node.Chunks.Remove(chunkId)
 			}
 		}
@@ -396,6 +393,6 @@ func (d CheckChunksOperation) Apply() (interface{}, error) {
 			delete(chunksMap, id)
 		}
 	}
-	logrus.Infof("Clean up done.")
+	Logger.Infof("Clean up done.")
 	return nil, nil
 }

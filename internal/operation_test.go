@@ -1,64 +1,16 @@
 package internal
 
 import (
-	"container/list"
 	"fmt"
+	"github.com/agiledragon/gomonkey"
+	"github.com/stretchr/testify/assert"
 	"io"
 	"os"
 	"sync"
 	"testing"
+	"tinydfs-base/common"
+	"tinydfs-base/protocol/pb"
 )
-
-func createRootFile(rootA *FileNode) func() {
-	file, err := os.OpenFile("test.txt", os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0755)
-	if err != nil {
-		fmt.Println("Create error, ", err.Error())
-	}
-	queue := list.New()
-	queue.PushBack(rootA)
-	for queue.Len() != 0 {
-		cur := queue.Front()
-		queue.Remove(cur)
-		node, _ := cur.Value.(*FileNode)
-		_, _ = file.WriteString(node.String())
-		for _, child := range node.ChildNodes {
-			queue.PushBack(child)
-		}
-	}
-	_ = file.Close()
-	return func() {
-		_ = os.Remove(file.Name())
-	}
-}
-
-//func TestReadRootLines(t *testing.T) {
-//	test := map[string]*struct {
-//		expectRoot *FileNode
-//	}{
-//		"RootA": {
-//			expectRoot: GetRootA(),
-//		},
-//	}
-//
-//	for n, c := range test {
-//		t.Run(n, func(t *testing.T) {
-//			teardown := createRootFile(c.expectRoot)
-//			defer teardown()
-//			mapp := ReadRootLines("test.txt")
-//			_, ok := mapp[c.expectRoot.Id]
-//			assert.True(t, ok)
-//		})
-//	}
-//}
-//
-//func TestRootDeserialize(t *testing.T) {
-//	rootA := GetRootA()
-//	teardown := createRootFile(rootA)
-//	defer teardown()
-//	nodeMap := ReadRootLines("test.txt")
-//	rootB := RootDeserialize(nodeMap)
-//	assert.True(t, rootA.IsDeepEqualTo(rootB))
-//}
 
 func TestWrite(t *testing.T) {
 	file, err := os.OpenFile("write.txt", os.O_CREATE|os.O_WRONLY, 0755)
@@ -98,5 +50,129 @@ func TestRead(t *testing.T) {
 			fmt.Println(err)
 		}
 		fmt.Println(string(bytes[:n]))
+	}
+
+}
+
+func TestAddOperation_Apply(t *testing.T) {
+	type args struct {
+		o AddOperation
+	}
+	tests := []struct {
+		name       string
+		args       args
+		Setup      func(t *testing.T)
+		wantResult interface{}
+		wantErr    error
+	}{
+		{
+			name: "CheckArgs_Success",
+			args: args{
+				o: AddOperation{
+					Id:    "op1",
+					Size:  120 * common.MB,
+					Stage: common.CheckArgs,
+				},
+			},
+			Setup: func(t *testing.T) {
+				addFileNode := gomonkey.ApplyFunc(AddFileNode, func(_ string, _ string, _ string,
+					_ int64, _ bool) (*FileNode, error) {
+					return &FileNode{
+						Id:     "fileNode1",
+						Chunks: []string{"chunk1", "chunk2"},
+					}, nil
+				})
+				t.Cleanup(func() {
+					addFileNode.Reset()
+				})
+			},
+			wantErr: nil,
+			wantResult: &pb.CheckArgs4AddReply{
+				FileNodeId: "fileNode1",
+				ChunkNum:   2,
+			},
+		},
+		{
+			name: "GetDataNodes_Success",
+			args: args{
+				o: AddOperation{
+					ChunkNum: 2,
+					Stage:    common.GetDataNodes,
+				},
+			},
+			Setup: func(t *testing.T) {
+				batchAllocateDataNodes := gomonkey.ApplyFunc(BatchAllocateDataNodes, func(_ int) [][]*DataNode {
+					return [][]*DataNode{
+						{
+							&DataNode{
+								Id:      "dataNode11",
+								Address: "address11",
+							},
+							&DataNode{
+								Id:      "dataNode12",
+								Address: "address12",
+							},
+							&DataNode{
+								Id:      "dataNode13",
+								Address: "address13",
+							},
+						},
+						{
+							&DataNode{
+								Id:      "dataNode21",
+								Address: "address21",
+							},
+							&DataNode{
+								Id:      "dataNode22",
+								Address: "address22",
+							},
+							&DataNode{
+								Id:      "dataNode23",
+								Address: "address23",
+							},
+						},
+					}
+				})
+				batchAddChunk := gomonkey.ApplyFunc(BatchAddChunk, func([]*Chunk) {
+				})
+				t.Cleanup(func() {
+					batchAllocateDataNodes.Reset()
+					batchAddChunk.Reset()
+				})
+			},
+			wantErr: nil,
+			wantResult: &pb.GetDataNodes4AddReply{
+				DataNodeIds: []*pb.GetDataNodes4AddReply_Array{
+					{
+						Items: []string{"dataNode11", "dataNode12", "dataNode13"},
+					},
+					{
+						Items: []string{"dataNode21", "dataNode22", "dataNode23"},
+					},
+				},
+				DataNodeAdds: []*pb.GetDataNodes4AddReply_Array{
+					{
+						Items: []string{"address11", "address12", "address13"},
+					},
+					{
+						Items: []string{"address21", "address22", "address23"},
+					},
+				},
+			},
+		},
+	}
+
+	// 执行测试用例
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.Setup != nil {
+				tt.Setup(t)
+			}
+			r, err := tt.args.o.Apply()
+			assert.Equal(t, tt.wantResult, r, "Unexpected result.")
+			if err != nil {
+				assert.EqualError(t, err, tt.wantErr.Error(), "Unexpected error.")
+			}
+		})
 	}
 }

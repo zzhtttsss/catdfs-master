@@ -16,6 +16,112 @@ const (
 	Success = "success"
 )
 
+// MonitorHeartbeat runs in a goroutine. This function monitor heartbeat of
+// all DataNode. It will check all DataNode in dataNodeMap every 1 minute,
+// there are 3 situations:
+// 1. We have received heartbeat of this DataNode in 30 seconds. if the status
+//    of it is waiting, we will set status to alive, or we will do nothing.
+// 2. The status of DataNode is alive, and we have not received heartbeat of it
+//    over 30 seconds, we will set status to waiting.
+// 3. The status of DataNode is waiting, and we have not received heartbeat of it
+//    over 10 minute, we will think this DataNode is dead and start a shrink.
+func MonitorHeartbeat(ctx context.Context) {
+	for {
+		select {
+		default:
+			updateMapLock.Lock()
+			for _, node := range dataNodeMap {
+				Logger.WithContext(ctx).Debugf("Datanode id: %s, chunk set: %s", node.Id, node.Chunks.String())
+				// Give died datanode a second chance to restart.
+				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkWaitingTime)*
+					viper.GetInt(common.ChunkHeartbeatTime) && node.status == common.Alive {
+					operation := &DegradeOperation{
+						Id:         util.GenerateUUIDString(),
+						DataNodeId: node.Id,
+						Stage:      common.Degrade2Waiting,
+					}
+					data := getData4Apply(operation, common.OperationDegrade)
+					_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+					continue
+				}
+				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) &&
+					node.status == common.Waiting {
+					csCountMonitor.Dec()
+					operation := &DegradeOperation{
+						Id:         util.GenerateUUIDString(),
+						DataNodeId: node.Id,
+						Stage:      common.Degrade2Dead,
+					}
+					data := getData4Apply(operation, common.OperationDegrade)
+					_ = GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+					continue
+				}
+			}
+			updateMapLock.Unlock()
+			Logger.WithContext(ctx).Infof("Complete a round of check, time: %s", time.Now().String())
+			time.Sleep(time.Duration(viper.GetInt(common.MasterCheckTime)) * time.Second)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// ConsumePendingChunk runs in a goroutine. This function will keep looping to
+// check the pendingChunkQueue, there are 3 situations:
+// 1. The timer is up, allocate all pending chunks in the pendingChunkQueue.
+// 2. The lengths of the pendingChunkQueue is greater than or equal to the quantity
+//    of a batch, allocate a batch of pending chunks in the pendingChunkQueue.
+// 3. None of the above conditions are met，just do nothing.
+func ConsumePendingChunk(ctx context.Context) {
+	if pendingChunkQueue.Len() > 0 {
+		BatchAllocateChunks()
+	}
+	timer := time.NewTicker(time.Duration(viper.GetInt(common.ChunkDeadChunkCheckTime)) * time.Second)
+	for {
+		select {
+		case <-timer.C:
+			BatchAllocateChunks()
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		default:
+			if pendingChunkQueue.Len() >= viper.GetInt(common.ChunkDeadChunkCopyThreshold) {
+				BatchAllocateChunks()
+			}
+		}
+	}
+}
+
+// CheckChunks checks dataNodeMap and chunkMap to remove the deleted chunks
+// whose storing fileNode id is not found in directory tree.
+func CheckChunks(ctx context.Context) {
+	timer := time.NewTicker(time.Duration(viper.GetInt(common.CleanupTime)) * time.Second)
+	for {
+		select {
+		case <-timer.C:
+			data := getData4Apply(CheckChunksOperation{Id: util.GenerateUUIDString()}, common.OperationDataCheck)
+			GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// CheckFileTree checks directory tree to remove the deleted fileNode
+// whose #{isDel} is true and #{delTime} has been pasted one day.
+func CheckFileTree(ctx context.Context) {
+	timer := time.NewTicker(time.Duration(viper.GetInt(common.DirectoryCheckTime)) * time.Second)
+	for {
+		select {
+		case <-timer.C:
+			data := getData4Apply(CheckFileTreeOperation{Id: util.GenerateUUIDString()}, common.OperationTreeCheck)
+			GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 var (
 	csCountMonitor = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "chunkserver_count",
@@ -51,34 +157,4 @@ func RequestCountInc(addr, op string) {
 
 func SuccessCountInc(addr, op string) {
 	rpcFromClientCountMonitor.WithLabelValues(addr, op, Success).Inc()
-}
-
-// CleanupRubbish checks dataNodeMap and chunkMap to remove the deleted chunks
-// whose storing fileNode id is not found in directory tree.
-func CleanupRubbish(ctx context.Context) {
-	timer := time.NewTicker(time.Duration(viper.GetInt(common.CleanupTime)) * time.Second)
-	for {
-		select {
-		case <-timer.C:
-			data := getData4Apply(CheckChunksOperation{Id: util.GenerateUUIDString()}, common.OperationDataCheck)
-			GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// DirectoryCheck checks directory tree to remove the deleted fileNode
-// whose #{isDel} is true and #{delTime} has been pasted one day.
-func DirectoryCheck(ctx context.Context) {
-	timer := time.NewTicker(time.Duration(viper.GetInt(common.DirectoryCheckTime)) * time.Second)
-	for {
-		select {
-		case <-timer.C:
-			data := getData4Apply(CheckFileTreeOperation{Id: util.GenerateUUIDString()}, common.OperationTreeCheck)
-			GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
-		case <-ctx.Done():
-			return
-		}
-	}
 }
