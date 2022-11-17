@@ -26,6 +26,8 @@ chunk:
   deadChunkCheckTime: 60  # dead chunk will be copied every 180s
   deadChunkCopyThreshold: 32  # dead chunk will be copied when count is 32 or more
   directoryCheckTime: 12
+  storableCheckTime: 60
+  storableThreshold: 80
 
 # etcd config
 etcd:

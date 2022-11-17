@@ -19,11 +19,11 @@ const (
 // MonitorHeartbeat runs in a goroutine. This function monitor heartbeat of
 // all DataNode. It will check all DataNode in dataNodeMap every 1 minute,
 // there are 3 situations:
-// 1. We have received heartbeat of this DataNode in 30 seconds. if the status
-//    of it is waiting, we will set status to alive, or we will do nothing.
-// 2. The status of DataNode is alive, and we have not received heartbeat of it
-//    over 30 seconds, we will set status to waiting.
-// 3. The status of DataNode is waiting, and we have not received heartbeat of it
+// 1. We have received heartbeat of this DataNode in 30 seconds. if the Status
+//    of it is waiting, we will set Status to alive, or we will do nothing.
+// 2. The Status of DataNode is alive, and we have not received heartbeat of it
+//    over 30 seconds, we will set Status to waiting.
+// 3. The Status of DataNode is waiting, and we have not received heartbeat of it
 //    over 10 minute, we will think this DataNode is dead and start a shrink.
 func MonitorHeartbeat(ctx context.Context) {
 	for {
@@ -34,7 +34,7 @@ func MonitorHeartbeat(ctx context.Context) {
 				Logger.WithContext(ctx).Debugf("Datanode id: %s, chunk set: %s", node.Id, node.Chunks.String())
 				// Give died datanode a second chance to restart.
 				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkWaitingTime)*
-					viper.GetInt(common.ChunkHeartbeatTime) && node.status == common.Alive {
+					viper.GetInt(common.ChunkHeartbeatTime) && node.Status == common.Alive {
 					operation := &DegradeOperation{
 						Id:         util.GenerateUUIDString(),
 						DataNodeId: node.Id,
@@ -45,7 +45,7 @@ func MonitorHeartbeat(ctx context.Context) {
 					continue
 				}
 				if int(time.Now().Sub(node.HeartbeatTime).Seconds()) > viper.GetInt(common.ChunkDieTime) &&
-					node.status == common.Waiting {
+					node.Status == common.Waiting {
 					csCountMonitor.Dec()
 					operation := &DegradeOperation{
 						Id:         util.GenerateUUIDString(),
@@ -99,7 +99,7 @@ func CheckChunks(ctx context.Context) {
 	for {
 		select {
 		case <-timer.C:
-			data := getData4Apply(CheckChunksOperation{Id: util.GenerateUUIDString()}, common.OperationDataCheck)
+			data := getData4Apply(CheckChunksOperation{Id: util.GenerateUUIDString()}, common.OperationChunksCheck)
 			GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
 		case <-ctx.Done():
 			return
@@ -107,14 +107,29 @@ func CheckChunks(ctx context.Context) {
 	}
 }
 
-// CheckFileTree checks directory tree to remove the deleted fileNode
-// whose #{isDel} is true and #{delTime} has been pasted one day.
+// CheckFileTree checks directory tree to remove the deleted fileNode whose
+// #{isDel} is true and #{delTime} has been pasted one day.
 func CheckFileTree(ctx context.Context) {
+	timer := time.NewTicker(time.Duration(viper.GetInt(common.StorableCheckTime)) * time.Second)
+	for {
+		select {
+		case <-timer.C:
+			data := getData4Apply(CheckDataNodesOperation{Id: util.GenerateUUIDString()}, common.OperationFileTreeCheck)
+			GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// CheckStorableDataNode checks how many DataNode is storable which means its
+// disk usage is below the threshold.
+func CheckStorableDataNode(ctx context.Context) {
 	timer := time.NewTicker(time.Duration(viper.GetInt(common.DirectoryCheckTime)) * time.Second)
 	for {
 		select {
 		case <-timer.C:
-			data := getData4Apply(CheckFileTreeOperation{Id: util.GenerateUUIDString()}, common.OperationTreeCheck)
+			data := getData4Apply(CheckDataNodesOperation{Id: util.GenerateUUIDString()}, common.OperationDataNodesCheck)
 			GlobalMasterHandler.Raft.Apply(data, 5*time.Second)
 		case <-ctx.Done():
 			return
