@@ -28,6 +28,7 @@ chunk:
   directoryCheckTime: 12
   storableCheckTime: 60
   storableThreshold: 80
+  expandThreshold : 10
 
 # etcd config
 etcd:

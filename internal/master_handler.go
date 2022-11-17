@@ -298,11 +298,7 @@ func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 				}
 				handler.FollowerStateObserver = getFollowerStateObserver()
 				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
-				go MonitorHeartbeat(subContext)
-				go ConsumePendingChunk(subContext)
-				go CheckChunks(subContext)
-				go CheckFileTree(subContext)
-				go CheckStorableDataNode(subContext)
+				StartMonitor(subContext)
 				Logger.WithContext(ctx).Infof("Become leader, success to change etcd leader infomation and monitor datanodes")
 			} else {
 				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
@@ -334,7 +330,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	p, _ := peer.FromContext(ctx)
 	address := strings.Split(p.Addr.String(), ":")[0]
 	Logger.WithContext(ctx).Infof("Get request for registering a datanode, address: %s", address)
-	need2Expand := IsNeed2Expand(len(args.ChunkIds))
+	need2Expand := IsNeed2Expand(int(args.UsedCapacity), int(args.FullCapacity))
 	dataNodeId := util.GenerateUUIDString()
 	// register first
 	operation := &RegisterOperation{
@@ -342,6 +338,8 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		Address:      address,
 		DataNodeId:   dataNodeId,
 		ChunkIds:     args.ChunkIds,
+		FullCapacity: int(args.FullCapacity),
+		UsedCapacity: int(args.UsedCapacity),
 		IsNeedExpand: need2Expand,
 	}
 	data := getData4Apply(operation, common.OperationRegister)

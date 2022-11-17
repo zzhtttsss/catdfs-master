@@ -16,6 +16,24 @@ const (
 	Success = "success"
 )
 
+var monitorFuncs = make([]monitorFunc, 0)
+
+func init() {
+	monitorFuncs = append(monitorFuncs, MonitorHeartbeat)
+	monitorFuncs = append(monitorFuncs, ConsumePendingChunk)
+	monitorFuncs = append(monitorFuncs, CheckChunks)
+	monitorFuncs = append(monitorFuncs, CheckFileTree)
+	monitorFuncs = append(monitorFuncs, CheckStorableDataNode)
+}
+
+func StartMonitor(ctx context.Context) {
+	for _, f := range monitorFuncs {
+		go f(ctx)
+	}
+}
+
+type monitorFunc func(ctx context.Context)
+
 // MonitorHeartbeat runs in a goroutine. This function monitor heartbeat of
 // all DataNode. It will check all DataNode in dataNodeMap every 1 minute,
 // there are 3 situations:

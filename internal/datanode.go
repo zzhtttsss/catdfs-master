@@ -381,7 +381,7 @@ func adjust(node *DataNode) {
 		heap.Push(&dataNodeHeap, node)
 	} else {
 		topNode := heap.Pop(&dataNodeHeap).(*DataNode)
-		if topNode.calUsage(0) > node.calUsage(0) {
+		if topNode.CalUsage(0) > node.CalUsage(0) {
 			heap.Push(&dataNodeHeap, node)
 		} else {
 			heap.Push(&dataNodeHeap, topNode)
@@ -399,7 +399,7 @@ func adjust4batch(node *DataNode, processMap map[*DataNode]int) {
 		heap.Push(&dataNodeHeap, node)
 	} else {
 		topNode := heap.Pop(&dataNodeHeap).(*DataNode)
-		if topNode.calUsage(processMap[topNode]) > node.calUsage(processMap[topNode]) {
+		if topNode.CalUsage(processMap[topNode]) > node.CalUsage(processMap[topNode]) {
 			heap.Push(&dataNodeHeap, node)
 		} else {
 			heap.Push(&dataNodeHeap, topNode)
@@ -407,8 +407,24 @@ func adjust4batch(node *DataNode, processMap map[*DataNode]int) {
 	}
 }
 
-func (d *DataNode) calUsage(temp int) int {
-	return int(math.Ceil(float64(d.UsedCapacity+temp) / float64(d.FullCapacity) * 100))
+func (d *DataNode) CalUsage(temp int) int {
+	return CalUsage(d.UsedCapacity, d.FullCapacity, temp)
+}
+
+func CalAvgUsage() int {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	usedSum := 0
+	fullSum := 0
+	for _, node := range dataNodeMap {
+		usedSum += node.UsedCapacity
+		fullSum += node.FullCapacity
+	}
+	return usedSum * 100 / fullSum
+}
+
+func CalUsage(usedCapacity int, fullCapacity int, temp int) int {
+	return int(math.Ceil(float64(usedCapacity+temp) / float64(fullCapacity) * 100))
 }
 
 // PersistDataNodes writes all DataNode in dataNodeMap to the sink for persistence.
@@ -478,11 +494,10 @@ func RestoreDataNodes(buf *bufio.Scanner) error {
 }
 
 // IsNeed2Expand finds out whether to expand.
-func IsNeed2Expand(newChunkNum int) bool {
-	avgChunkNum := GetAvgChunkNum()
-	diff := avgChunkNum - newChunkNum
-	// TODO 磁盘占有率
-	return diff > 1
+func IsNeed2Expand(usedCapacity int, fullCapacity int) bool {
+	avgUsage := CalAvgUsage()
+	currentUsage := CalUsage(usedCapacity, fullCapacity, 0)
+	return avgUsage-currentUsage > viper.GetInt(common.ExpandThreshold)
 }
 
 func GetAvgChunkNum() int {
@@ -502,8 +517,9 @@ func GetAvgChunkNum() int {
 // DoExpand gets the chunk copied according to this new dataNode.
 func DoExpand(dataNode *DataNode) int {
 	Logger.Infof("Start to expand with dataNode %s", dataNode.Id)
+	currentUsage := dataNode.CalUsage(0)
 	var (
-		pendingCount  = GetAvgChunkNum()
+		pendingCount  = (CalAvgUsage()-currentUsage)*dataNode.FullCapacity/(100*common.ChunkSize) + 1
 		selfChunks    = dataNode.Chunks
 		pendingChunks = set.NewSet()
 		pendingMap    = map[string][]string{}

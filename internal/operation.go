@@ -62,6 +62,8 @@ type RegisterOperation struct {
 	Address      string   `json:"address"`
 	DataNodeId   string   `json:"data_node_id"`
 	ChunkIds     []string `json:"chunkIds"`
+	FullCapacity int      `json:"full_capacity"`
+	UsedCapacity int      `json:"used_capacity"`
 	IsNeedExpand bool     `json:"is_need_expand"`
 }
 
@@ -81,6 +83,8 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 		Address:          o.Address,
 		Chunks:           newSet,
 		IOLoad:           0,
+		FullCapacity:     o.FullCapacity,
+		UsedCapacity:     o.UsedCapacity,
 		HeartbeatTime:    time.Now(),
 		FutureSendChunks: make(map[ChunkSendInfo]int),
 	}
@@ -414,7 +418,7 @@ func (o CheckDataNodesOperation) Apply() (interface{}, error) {
 	var num int64
 	updateMapLock.RLock()
 	for _, node := range dataNodeMap {
-		if node.calUsage(0) < viper.GetInt(common.StorableThreshold) {
+		if node.CalUsage(0) < viper.GetInt(common.StorableThreshold) {
 			num++
 		}
 	}
