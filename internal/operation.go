@@ -422,7 +422,7 @@ func (o CheckDataNodesOperation) Apply() (interface{}, error) {
 			num++
 		}
 	}
-	updateChunksLock.RUnlock()
+	updateMapLock.RUnlock()
 	StorableNum.Store(num)
 	Logger.Debugf("Check done.")
 	return nil, nil

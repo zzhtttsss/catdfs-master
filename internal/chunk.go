@@ -417,6 +417,9 @@ func UpdateChunk4Heartbeat(o HeartbeatOperation) {
 		if chunk, ok := chunksMap[info.ChunkId]; ok {
 			chunk.pendingDataNodes.Remove(info.DataNodeId)
 			chunk.dataNodes.Add(info.DataNodeId)
+			if info.SendType == common.MoveSendType {
+				chunk.dataNodes.Remove(o.DataNodeId)
+			}
 		}
 	}
 	for _, info := range o.FailInfos {

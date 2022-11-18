@@ -6,6 +6,7 @@ import (
 	"fmt"
 	set "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"go.uber.org/atomic"
 	"math"
@@ -164,12 +165,20 @@ func UpdateDataNode4Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	dataNode.IOLoad = int(o.IOLoad)
 	for _, info := range o.SuccessInfos {
 		delete(dataNode.FutureSendChunks, info)
+		if info.SendType == common.MoveSendType || info.SendType == common.DeleteSendType {
+			dataNode.Chunks.Remove(info.ChunkId)
+		}
+		// If SendType is delete, ok is false.
 		if dataNodeS, ok := dataNodeMap[info.DataNodeId]; ok {
 			dataNodeS.Chunks.Add(info.ChunkId)
 		}
 	}
 	for _, info := range o.FailInfos {
 		delete(dataNode.FutureSendChunks, info)
+		// No need to handle move or delete chunk failure.
+		if info.SendType == common.MoveSendType || info.SendType == common.DeleteSendType {
+			continue
+		}
 		pendingChunkQueue.Push(String(info.ChunkId))
 	}
 	nextChunkInfos := make([]ChunkSendInfo, 0, len(dataNode.FutureSendChunks))
@@ -416,6 +425,9 @@ func CalAvgUsage() int {
 	defer updateMapLock.RUnlock()
 	usedSum := 0
 	fullSum := 0
+	if len(dataNodeMap) == 0 {
+		return 0
+	}
 	for _, node := range dataNodeMap {
 		usedSum += node.UsedCapacity
 		fullSum += node.FullCapacity
@@ -497,6 +509,7 @@ func RestoreDataNodes(buf *bufio.Scanner) error {
 func IsNeed2Expand(usedCapacity int, fullCapacity int) bool {
 	avgUsage := CalAvgUsage()
 	currentUsage := CalUsage(usedCapacity, fullCapacity, 0)
+	logrus.Warnf("IsNeed2Expand, avgUsage: %v, currentUsage: %v", avgUsage, currentUsage)
 	return avgUsage-currentUsage > viper.GetInt(common.ExpandThreshold)
 }
 
@@ -524,6 +537,7 @@ func DoExpand(dataNode *DataNode) int {
 		pendingChunks = set.NewSet()
 		pendingMap    = map[string][]string{}
 	)
+	logrus.Warnf("DoExpand, pendingCount: %v", pendingCount)
 For:
 	for {
 		notFound := true

@@ -128,7 +128,7 @@ func CheckChunks(ctx context.Context) {
 // CheckFileTree checks directory tree to remove the deleted fileNode whose
 // #{isDel} is true and #{delTime} has been pasted one day.
 func CheckFileTree(ctx context.Context) {
-	timer := time.NewTicker(time.Duration(viper.GetInt(common.StorableCheckTime)) * time.Second)
+	timer := time.NewTicker(time.Duration(viper.GetInt(common.DirectoryCheckTime)) * time.Second)
 	for {
 		select {
 		case <-timer.C:
@@ -143,7 +143,7 @@ func CheckFileTree(ctx context.Context) {
 // CheckStorableDataNode checks how many DataNode is storable which means its
 // disk usage is below the threshold.
 func CheckStorableDataNode(ctx context.Context) {
-	timer := time.NewTicker(time.Duration(viper.GetInt(common.DirectoryCheckTime)) * time.Second)
+	timer := time.NewTicker(time.Duration(viper.GetInt(common.StorableCheckTime)) * time.Second)
 	for {
 		select {
 		case <-timer.C:
