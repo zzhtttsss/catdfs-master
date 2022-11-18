@@ -6,7 +6,6 @@ import (
 	"fmt"
 	set "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"go.uber.org/atomic"
 	"math"
@@ -509,7 +508,6 @@ func RestoreDataNodes(buf *bufio.Scanner) error {
 func IsNeed2Expand(usedCapacity int, fullCapacity int) bool {
 	avgUsage := CalAvgUsage()
 	currentUsage := CalUsage(usedCapacity, fullCapacity, 0)
-	logrus.Warnf("IsNeed2Expand, avgUsage: %v, currentUsage: %v", avgUsage, currentUsage)
 	return avgUsage-currentUsage > viper.GetInt(common.ExpandThreshold)
 }
 
@@ -537,7 +535,6 @@ func DoExpand(dataNode *DataNode) int {
 		pendingChunks = set.NewSet()
 		pendingMap    = map[string][]string{}
 	)
-	logrus.Warnf("DoExpand, pendingCount: %v", pendingCount)
 For:
 	for {
 		notFound := true

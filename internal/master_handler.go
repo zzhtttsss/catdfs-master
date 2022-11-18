@@ -342,7 +342,6 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		UsedCapacity: int(args.UsedCapacity),
 		IsNeedExpand: need2Expand,
 	}
-	logrus.Warnf("register, datanodeId: %s, FullCapacity: %v, UsedCapacity: %v", dataNodeId, args.FullCapacity, args.UsedCapacity)
 	data := getData4Apply(operation, common.OperationRegister)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
 	if err := applyFuture.Error(); err != nil {
@@ -395,7 +394,6 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		FailInfos:    failInfos,
 		IsReady:      args.IsReady,
 	}
-	logrus.Warnf("datanodeId: %s, FullCapacity: %v, UsedCapacity: %v", args.Id, args.FullCapacity, args.UsedCapacity)
 	data := getData4Apply(operation, common.OperationHeartbeat)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
 	if err := applyFuture.Error(); err != nil {
