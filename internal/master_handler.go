@@ -298,10 +298,7 @@ func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 				}
 				handler.FollowerStateObserver = getFollowerStateObserver()
 				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
-				go MonitorHeartbeat(subContext)
-				go ConsumePendingChunk(subContext)
-				go CheckChunks(subContext)
-				go CheckFileTree(subContext)
+				StartMonitor(subContext)
 				Logger.WithContext(ctx).Infof("Become leader, success to change etcd leader infomation and monitor datanodes")
 			} else {
 				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
@@ -333,7 +330,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	p, _ := peer.FromContext(ctx)
 	address := strings.Split(p.Addr.String(), ":")[0]
 	Logger.WithContext(ctx).Infof("Get request for registering a datanode, address: %s", address)
-	need2Expand := IsNeed2Expand(len(args.ChunkIds))
+	need2Expand := IsNeed2Expand(int(args.UsedCapacity), int(args.FullCapacity))
 	dataNodeId := util.GenerateUUIDString()
 	// register first
 	operation := &RegisterOperation{
@@ -341,6 +338,8 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		Address:      address,
 		DataNodeId:   dataNodeId,
 		ChunkIds:     args.ChunkIds,
+		FullCapacity: int(args.FullCapacity),
+		UsedCapacity: int(args.UsedCapacity),
 		IsNeedExpand: need2Expand,
 	}
 	data := getData4Apply(operation, common.OperationRegister)
@@ -389,6 +388,8 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 		DataNodeId:   args.Id,
 		ChunkIds:     args.ChunkId,
 		IOLoad:       args.IOLoad,
+		FullCapacity: args.FullCapacity,
+		UsedCapacity: args.UsedCapacity,
 		SuccessInfos: successInfos,
 		FailInfos:    failInfos,
 		IsReady:      args.IsReady,
@@ -422,11 +423,21 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 	return heartbeatReply, nil
 }
 
-// CheckArgs4Add is called by client. It checks whether the path and file name
-// entered by the user in the Add operation are legal.
+// CheckArgs4Add is called by client. It checks whether there is enough space
+// to store the file and the path and file name entered by the user in the Add
+// operation are legal.
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
 	Logger.WithContext(ctx).Infof("Get request for checking path and filename for add operation, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
 	RequestCountInc(handler.SelfAddr, common.OperationAdd)
+	if int(StorableNum.Load()) < viper.GetInt(common.ReplicaNum) {
+		err := fmt.Errorf("insufficient free space in the catfs to store the file")
+		Logger.Errorf("Fail to check path and filename for add operation, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckArgs4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
 	operation := &AddOperation{
 		Id:         util.GenerateUUIDString(),
 		FileNodeId: util.GenerateUUIDString(),

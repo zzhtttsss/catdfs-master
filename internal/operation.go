@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	set "github.com/deckarep/golang-set"
+	"github.com/spf13/viper"
 	"reflect"
 	"strconv"
 	"strings"
@@ -36,8 +37,9 @@ func init() {
 	OpTypeMap[common.OperationAllocateChunks] = reflect.TypeOf(AllocateChunksOperation{})
 	OpTypeMap[common.OperationExpand] = reflect.TypeOf(ExpandOperation{})
 	OpTypeMap[common.OperationDegrade] = reflect.TypeOf(DegradeOperation{})
-	OpTypeMap[common.OperationTreeCheck] = reflect.TypeOf(CheckFileTreeOperation{})
-	OpTypeMap[common.OperationDataCheck] = reflect.TypeOf(CheckChunksOperation{})
+	OpTypeMap[common.OperationFileTreeCheck] = reflect.TypeOf(CheckFileTreeOperation{})
+	OpTypeMap[common.OperationChunksCheck] = reflect.TypeOf(CheckChunksOperation{})
+	OpTypeMap[common.OperationDataNodesCheck] = reflect.TypeOf(CheckDataNodesOperation{})
 }
 
 // Operation represents requests to make changes to metadata. If we want to modify the metadata,
@@ -60,6 +62,8 @@ type RegisterOperation struct {
 	Address      string   `json:"address"`
 	DataNodeId   string   `json:"data_node_id"`
 	ChunkIds     []string `json:"chunkIds"`
+	FullCapacity int      `json:"full_capacity"`
+	UsedCapacity int      `json:"used_capacity"`
 	IsNeedExpand bool     `json:"is_need_expand"`
 }
 
@@ -75,15 +79,17 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 	}
 	datanode := &DataNode{
 		Id:               o.DataNodeId,
-		status:           status,
+		Status:           status,
 		Address:          o.Address,
 		Chunks:           newSet,
 		IOLoad:           0,
+		FullCapacity:     o.FullCapacity,
+		UsedCapacity:     o.UsedCapacity,
 		HeartbeatTime:    time.Now(),
 		FutureSendChunks: make(map[ChunkSendInfo]int),
 	}
 	AddDataNode(datanode)
-	Logger.Infof("[Id = %s] Connected, status %v", o.DataNodeId, status)
+	Logger.Infof("[Id = %s] Connected, Status %v", o.DataNodeId, status)
 	return o.DataNodeId, nil
 }
 
@@ -92,6 +98,8 @@ type HeartbeatOperation struct {
 	DataNodeId   string          `json:"data_node_id"`
 	ChunkIds     []string        `json:"chunkIds"`
 	IOLoad       int64           `json:"io_load"`
+	FullCapacity int64           `json:"full_capacity"`
+	UsedCapacity int64           `json:"used_capacity"`
 	SuccessInfos []ChunkSendInfo `json:"success_infos"`
 	FailInfos    []ChunkSendInfo `json:"fail_infos"`
 	IsReady      bool            `json:"is_ready"`
@@ -373,6 +381,7 @@ type CheckChunksOperation struct {
 
 func (d CheckChunksOperation) Apply() (interface{}, error) {
 	Logger.Infof("Start to clean up rubbish in dataMap and chunkMap.")
+	updateMapLock.Lock()
 	for _, node := range dataNodeMap {
 		for _, chunkId := range node.Chunks.ToSlice() {
 			fileNodeId := strings.Split(chunkId.(string), common.ChunkIdDelimiter)[0]
@@ -387,12 +396,34 @@ func (d CheckChunksOperation) Apply() (interface{}, error) {
 			}
 		}
 	}
+	updateMapLock.Unlock()
+	updateChunksLock.Lock()
 	for id := range chunksMap {
 		fileNodeId := strings.Split(id, common.ChunkIdDelimiter)[0]
 		if !fileNodeIdSet.Contains(fileNodeId) {
 			delete(chunksMap, id)
 		}
 	}
+	updateChunksLock.Unlock()
 	Logger.Infof("Clean up done.")
+	return nil, nil
+}
+
+type CheckDataNodesOperation struct {
+	Id string `json:"id"`
+}
+
+func (o CheckDataNodesOperation) Apply() (interface{}, error) {
+	Logger.Debugf("Start to check the number of storable DataNode.")
+	var num int64
+	updateMapLock.RLock()
+	for _, node := range dataNodeMap {
+		if node.CalUsage(0) < viper.GetInt(common.StorableThreshold) {
+			num++
+		}
+	}
+	updateMapLock.RUnlock()
+	StorableNum.Store(num)
+	Logger.Debugf("Check done.")
 	return nil, nil
 }
