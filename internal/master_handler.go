@@ -504,6 +504,7 @@ func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAnd
 		FileNodeId:  fileNode.Id,
 		ChunkNum:    int32(len(fileNode.Chunks)),
 		OperationId: operation.Id,
+		FileSize:    fileNode.Size,
 	}
 	Logger.WithContext(ctx).Infof("Success to check path for get operation, path: %s", args.Path)
 	return rep, nil

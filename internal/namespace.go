@@ -55,7 +55,7 @@ type FileNode struct {
 	ParentNode *FileNode
 	// ChildNodes includes all child FileNode of this node, using FileName as key.
 	ChildNodes map[string]*FileNode
-	// Chunks is id of all Chunk in this file.
+	// Chunks is id of all Chunk in this file whose data is current FileNode id + chunkIndex
 	Chunks []string
 	// Size is the size of the file. Use bytes as the unit of measurement which
 	// means 1kb will be 1024. The size of the directory is 0.

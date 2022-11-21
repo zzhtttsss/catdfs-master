@@ -204,7 +204,8 @@ func (o GetOperation) Apply() (interface{}, error) {
 	case common.CheckArgs:
 		return CheckAndGetFileNode(o.Path)
 	case common.GetDataNodes:
-		chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.FormatInt(int64(o.ChunkIndex), 10)
+		chunkIndex := strconv.FormatInt(int64(o.ChunkIndex), 10)
+		chunkId := o.FileNodeId + common.ChunkIdDelimiter + chunkIndex
 		chunk := GetChunk(chunkId)
 		dataNodeIds, dataNodeAddrs := GetSortedDataNodeIds(chunk.dataNodes)
 		rep := &pb.GetDataNodes4GetReply{
