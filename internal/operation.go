@@ -94,15 +94,16 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 }
 
 type HeartbeatOperation struct {
-	Id           string          `json:"id"`
-	DataNodeId   string          `json:"data_node_id"`
-	ChunkIds     []string        `json:"chunkIds"`
-	IOLoad       int64           `json:"io_load"`
-	FullCapacity int64           `json:"full_capacity"`
-	UsedCapacity int64           `json:"used_capacity"`
-	SuccessInfos []ChunkSendInfo `json:"success_infos"`
-	FailInfos    []ChunkSendInfo `json:"fail_infos"`
-	IsReady      bool            `json:"is_ready"`
+	Id            string          `json:"id"`
+	DataNodeId    string          `json:"data_node_id"`
+	ChunkIds      []string        `json:"chunkIds"`
+	IOLoad        int64           `json:"io_load"`
+	FullCapacity  int64           `json:"full_capacity"`
+	UsedCapacity  int64           `json:"used_capacity"`
+	SuccessInfos  []ChunkSendInfo `json:"success_infos"`
+	FailInfos     []ChunkSendInfo `json:"fail_infos"`
+	InvalidChunks []string        `json:"invalid_chunks"`
+	IsReady       bool            `json:"is_ready"`
 }
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {

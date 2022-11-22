@@ -427,4 +427,10 @@ func UpdateChunk4Heartbeat(o HeartbeatOperation) {
 			chunk.pendingDataNodes.Remove(info.DataNodeId)
 		}
 	}
+	for _, chunkId := range o.InvalidChunks {
+		if chunk, ok := chunksMap[chunkId]; ok {
+			chunk.dataNodes.Remove(o.DataNodeId)
+			pendingChunkQueue.Push(String(chunkId))
+		}
+	}
 }

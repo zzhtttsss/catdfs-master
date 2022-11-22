@@ -180,6 +180,9 @@ func UpdateDataNode4Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 		}
 		pendingChunkQueue.Push(String(info.ChunkId))
 	}
+	for _, chunkId := range o.InvalidChunks {
+		dataNode.Chunks.Remove(chunkId)
+	}
 	nextChunkInfos := make([]ChunkSendInfo, 0, len(dataNode.FutureSendChunks))
 	Logger.Debugf("[DataNode = %s] FutureSendChunks: %v", dataNode.Id, dataNode.FutureSendChunks)
 	for info, i := range dataNode.FutureSendChunks {

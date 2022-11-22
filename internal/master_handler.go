@@ -384,15 +384,16 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 	successInfos := ConvChunkInfo(args.SuccessChunkInfos)
 	failInfos := ConvChunkInfo(args.FailChunkInfos)
 	operation := &HeartbeatOperation{
-		Id:           util.GenerateUUIDString(),
-		DataNodeId:   args.Id,
-		ChunkIds:     args.ChunkId,
-		IOLoad:       args.IOLoad,
-		FullCapacity: args.FullCapacity,
-		UsedCapacity: args.UsedCapacity,
-		SuccessInfos: successInfos,
-		FailInfos:    failInfos,
-		IsReady:      args.IsReady,
+		Id:            util.GenerateUUIDString(),
+		DataNodeId:    args.Id,
+		ChunkIds:      args.ChunkId,
+		IOLoad:        args.IOLoad,
+		FullCapacity:  args.FullCapacity,
+		UsedCapacity:  args.UsedCapacity,
+		SuccessInfos:  successInfos,
+		FailInfos:     failInfos,
+		InvalidChunks: args.InvalidChunks,
+		IsReady:       args.IsReady,
 	}
 	data := getData4Apply(operation, common.OperationHeartbeat)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
