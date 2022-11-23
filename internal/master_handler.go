@@ -584,9 +584,9 @@ func (handler *MasterHandler) Callback4Add(ctx context.Context, args *pb.Callbac
 		Path:         args.FilePath,
 		Stage:        common.UnlockDic,
 	}
-	infos := make([]util.ChunkSendResult, len(args.Infos))
+	infos := make([]util.ChunkTaskResult, len(args.Infos))
 	for i, info := range args.Infos {
-		infos[i] = util.ChunkSendResult{
+		infos[i] = util.ChunkTaskResult{
 			ChunkId:          info.ChunkId,
 			SuccessDataNodes: info.SuccessNode,
 			FailDataNodes:    info.FailNode,

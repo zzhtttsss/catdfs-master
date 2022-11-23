@@ -123,7 +123,7 @@ type AddOperation struct {
 	FileNodeId   string                 `json:"file_node_id"`
 	ChunkNum     int32                  `json:"chunk_num"`
 	ChunkId      string                 `json:"chunk_id"`
-	Infos        []util.ChunkSendResult `json:"infos"`
+	Infos        []util.ChunkTaskResult `json:"infos"`
 	FailChunkIds []string               `json:"fail_chunk_ids"`
 	Stage        int                    `json:"stage"`
 }

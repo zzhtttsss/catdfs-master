@@ -109,7 +109,7 @@ func BatchClearPendingDataNodes(chunkIds []string) {
 
 // BatchUpdatePendingDataNodes move all DataNode which have store the corresponding
 // Chunk successfully from that Chunk's pendingDataNodes to its dataNodes.
-func BatchUpdatePendingDataNodes(infos []util.ChunkSendResult) {
+func BatchUpdatePendingDataNodes(infos []util.ChunkTaskResult) {
 	updateChunksLock.Lock()
 	defer updateChunksLock.Unlock()
 	for _, info := range infos {

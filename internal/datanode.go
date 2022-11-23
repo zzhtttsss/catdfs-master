@@ -261,7 +261,7 @@ func BatchApplyPlan2DataNode(receiverPlan []int, senderPlan []int, chunkIds []st
 	}
 }
 
-func BatchAddChunks(infos []util.ChunkSendResult) {
+func BatchAddChunks(infos []util.ChunkTaskResult) {
 	updateMapLock.Lock()
 	defer updateMapLock.Unlock()
 	for _, info := range infos {
