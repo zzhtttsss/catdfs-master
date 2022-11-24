@@ -410,7 +410,7 @@ func adjust4batch(node *DataNode, processMap map[*DataNode]int) {
 		heap.Push(&dataNodeHeap, node)
 	} else {
 		topNode := heap.Pop(&dataNodeHeap).(*DataNode)
-		if topNode.CalUsage(processMap[topNode]) > node.CalUsage(processMap[topNode]) {
+		if topNode.CalUsage(processMap[topNode]) > node.CalUsage(processMap[node]) {
 			heap.Push(&dataNodeHeap, node)
 		} else {
 			heap.Push(&dataNodeHeap, topNode)
