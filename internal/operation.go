@@ -146,7 +146,7 @@ func (o AddOperation) Apply() (interface{}, error) {
 		dataNodeIds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
 		dataNodeAdds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
 		for i := 0; i < int(o.ChunkNum); i++ {
-			chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.Itoa(i)
+			chunkId := util.CombineString(o.FileNodeId, common.ChunkIdDelimiter, strconv.Itoa(i))
 			var (
 				dataNodeIdSet = set.NewSet()
 				dnIds         = make([]string, len(dataNodes[0]))
@@ -205,7 +205,7 @@ func (o GetOperation) Apply() (interface{}, error) {
 	case common.CheckArgs:
 		return CheckAndGetFileNode(o.Path)
 	case common.GetDataNodes:
-		chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.FormatInt(int64(o.ChunkIndex), 10)
+		chunkId := util.CombineString(o.FileNodeId, common.ChunkIdDelimiter, strconv.FormatInt(int64(o.ChunkIndex), 10))
 		chunk := GetChunk(chunkId)
 		dataNodeIds, dataNodeAddrs := GetSortedDataNodeIds(chunk.dataNodes)
 		rep := &pb.GetDataNodes4GetReply{
