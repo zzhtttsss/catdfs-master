@@ -77,6 +77,6 @@ require (
 
 replace github.com/agiledragon/gomonkey => github.com/agiledragon/gomonkey/v2 v2.8.0
 
-replace tinydfs-base => github.com/zzhtttsss/catdfs-base v0.0.0-20221123110310-6419644e6a74
+replace tinydfs-base => github.com/zzhtttsss/catdfs-base v0.0.0-20221125150532-6335303d8685
 
 //replace tinydfs-base => ../catdfs-base
