@@ -39,7 +39,6 @@ func init() {
 	config.InitConfig()
 	Logger = config.InitLogger(Logger, true)
 	Logger.SetLevel(logrus.Level(viper.GetInt(common.MasterLogLevel)))
-
 }
 
 // MasterHandler represent a master node to handle all incoming requests.
