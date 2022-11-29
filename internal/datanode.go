@@ -180,6 +180,9 @@ func UpdateDataNode4Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 		}
 		pendingChunkQueue.Push(String(info.ChunkId))
 	}
+	for _, chunkId := range o.InvalidChunks {
+		dataNode.Chunks.Remove(chunkId)
+	}
 	nextChunkInfos := make([]ChunkSendInfo, 0, len(dataNode.FutureSendChunks))
 	Logger.Debugf("[DataNode = %s] FutureSendChunks: %v", dataNode.Id, dataNode.FutureSendChunks)
 	for info, i := range dataNode.FutureSendChunks {
@@ -258,7 +261,7 @@ func BatchApplyPlan2DataNode(receiverPlan []int, senderPlan []int, chunkIds []st
 	}
 }
 
-func BatchAddChunks(infos []util.ChunkSendResult) {
+func BatchAddChunks(infos []util.ChunkTaskResult) {
 	updateMapLock.Lock()
 	defer updateMapLock.Unlock()
 	for _, info := range infos {
@@ -407,7 +410,7 @@ func adjust4batch(node *DataNode, processMap map[*DataNode]int) {
 		heap.Push(&dataNodeHeap, node)
 	} else {
 		topNode := heap.Pop(&dataNodeHeap).(*DataNode)
-		if topNode.CalUsage(processMap[topNode]) > node.CalUsage(processMap[topNode]) {
+		if topNode.CalUsage(processMap[topNode]) > node.CalUsage(processMap[node]) {
 			heap.Push(&dataNodeHeap, node)
 		} else {
 			heap.Push(&dataNodeHeap, topNode)
