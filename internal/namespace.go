@@ -135,7 +135,7 @@ func initChunks(size int64, id string) []string {
 	nums := int(math.Ceil(float64(size) / float64(common.ChunkSize)))
 	chunks := make([]string, nums)
 	for i := 0; i < len(chunks); i++ {
-		chunks[i] = id + strconv.Itoa(i)
+		chunks[i] = util.CombineString(id, strconv.Itoa(i))
 	}
 	return chunks
 }
@@ -183,7 +183,7 @@ func removeFileNode(path string, isDummy bool) (*FileNode, error) {
 	}
 
 	delete(fileNode.ParentNode.ChildNodes, fileNode.FileName)
-	fileNode.FileName = deleteFilePrefix + fileNode.Id + deleteDelimiter + fileNode.FileName
+	fileNode.FileName = util.CombineString(deleteFilePrefix, fileNode.Id, deleteDelimiter, fileNode.FileName)
 	fileNode.ParentNode.ChildNodes[fileNode.FileName] = fileNode
 
 	fileNode.IsDel = true

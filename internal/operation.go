@@ -94,15 +94,16 @@ func (o RegisterOperation) Apply() (interface{}, error) {
 }
 
 type HeartbeatOperation struct {
-	Id           string          `json:"id"`
-	DataNodeId   string          `json:"data_node_id"`
-	ChunkIds     []string        `json:"chunkIds"`
-	IOLoad       int64           `json:"io_load"`
-	FullCapacity int64           `json:"full_capacity"`
-	UsedCapacity int64           `json:"used_capacity"`
-	SuccessInfos []ChunkSendInfo `json:"success_infos"`
-	FailInfos    []ChunkSendInfo `json:"fail_infos"`
-	IsReady      bool            `json:"is_ready"`
+	Id            string          `json:"id"`
+	DataNodeId    string          `json:"data_node_id"`
+	ChunkIds      []string        `json:"chunkIds"`
+	IOLoad        int64           `json:"io_load"`
+	FullCapacity  int64           `json:"full_capacity"`
+	UsedCapacity  int64           `json:"used_capacity"`
+	SuccessInfos  []ChunkSendInfo `json:"success_infos"`
+	FailInfos     []ChunkSendInfo `json:"fail_infos"`
+	InvalidChunks []string        `json:"invalid_chunks"`
+	IsReady       bool            `json:"is_ready"`
 }
 
 func (o HeartbeatOperation) Apply() (interface{}, error) {
@@ -122,7 +123,7 @@ type AddOperation struct {
 	FileNodeId   string                 `json:"file_node_id"`
 	ChunkNum     int32                  `json:"chunk_num"`
 	ChunkId      string                 `json:"chunk_id"`
-	Infos        []util.ChunkSendResult `json:"infos"`
+	Infos        []util.ChunkTaskResult `json:"infos"`
 	FailChunkIds []string               `json:"fail_chunk_ids"`
 	Stage        int                    `json:"stage"`
 }
@@ -145,7 +146,7 @@ func (o AddOperation) Apply() (interface{}, error) {
 		dataNodeIds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
 		dataNodeAdds := make([]*pb.GetDataNodes4AddReply_Array, int(o.ChunkNum))
 		for i := 0; i < int(o.ChunkNum); i++ {
-			chunkId := o.FileNodeId + common.ChunkIdDelimiter + strconv.Itoa(i)
+			chunkId := util.CombineString(o.FileNodeId, common.ChunkIdDelimiter, strconv.Itoa(i))
 			var (
 				dataNodeIdSet = set.NewSet()
 				dnIds         = make([]string, len(dataNodes[0]))
@@ -204,8 +205,7 @@ func (o GetOperation) Apply() (interface{}, error) {
 	case common.CheckArgs:
 		return CheckAndGetFileNode(o.Path)
 	case common.GetDataNodes:
-		chunkIndex := strconv.FormatInt(int64(o.ChunkIndex), 10)
-		chunkId := o.FileNodeId + common.ChunkIdDelimiter + chunkIndex
+		chunkId := util.CombineString(o.FileNodeId, common.ChunkIdDelimiter, strconv.FormatInt(int64(o.ChunkIndex), 10))
 		chunk := GetChunk(chunkId)
 		dataNodeIds, dataNodeAddrs := GetSortedDataNodeIds(chunk.dataNodes)
 		rep := &pb.GetDataNodes4GetReply{

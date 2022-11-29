@@ -103,7 +103,7 @@ func (handler *MasterHandler) initRaft() error {
 	if err != nil {
 		return err
 	}
-	handler.raftAddress = localIP + common.AddressDelimiter + viper.GetString(common.MasterRaftPort)
+	handler.raftAddress = util.CombineString(localIP, common.AddressDelimiter, viper.GetString(common.MasterRaftPort))
 	raftConfig.LocalID = raft.ServerID(handler.raftAddress)
 
 	handler.MonitorChan = make(chan bool, 1)
@@ -198,7 +198,7 @@ func (handler *MasterHandler) bootstrapOrJoinCluster() error {
 func (handler *MasterHandler) joinCluster(getResp *clientv3.GetResponse) (*pb.JoinClusterReply, error) {
 	ctx := context.Background()
 	addr := string(getResp.Kvs[0].Value)
-	addr = strings.Split(addr, common.AddressDelimiter)[0] + viper.GetString(common.MasterPort)
+	addr = util.CombineString(strings.Split(addr, common.AddressDelimiter)[0], viper.GetString(common.MasterPort))
 
 	conn, _ := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	client := pb.NewRaftServiceClient(conn)
@@ -224,7 +224,8 @@ func (handler *MasterHandler) putAndKeepFollower() {
 		Logger.Panicf("Fail to create lease with etcd, error detail: %s", err.Error())
 	}
 	handler.FollowerLeaseId = lease.ID
-	_, err = kv.Put(ctx, common.FollowerKeyPrefix+hostname, handler.raftAddress, clientv3.WithLease(lease.ID))
+	_, err = kv.Put(ctx, util.CombineString(common.FollowerKeyPrefix, hostname), handler.raftAddress,
+		clientv3.WithLease(lease.ID))
 
 	keepAliveChan, err := client.KeepAlive(ctx, lease.ID)
 	if err != nil {
@@ -241,7 +242,7 @@ func (handler *MasterHandler) putAndKeepFollower() {
 func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClusterArgs) (*pb.JoinClusterReply, error) {
 	p, _ := peer.FromContext(ctx)
 	address := strings.Split(p.Addr.String(), common.AddressDelimiter)[0]
-	rAddress := address + common.AddressDelimiter + viper.GetString(common.MasterRaftPort)
+	rAddress := util.CombineString(address, common.AddressDelimiter, viper.GetString(common.MasterRaftPort))
 	Logger.Infof("Get request to join cluster, address : %s", rAddress)
 	cf := handler.Raft.GetConfiguration()
 
@@ -383,15 +384,16 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 	successInfos := ConvChunkInfo(args.SuccessChunkInfos)
 	failInfos := ConvChunkInfo(args.FailChunkInfos)
 	operation := &HeartbeatOperation{
-		Id:           util.GenerateUUIDString(),
-		DataNodeId:   args.Id,
-		ChunkIds:     args.ChunkId,
-		IOLoad:       args.IOLoad,
-		FullCapacity: args.FullCapacity,
-		UsedCapacity: args.UsedCapacity,
-		SuccessInfos: successInfos,
-		FailInfos:    failInfos,
-		IsReady:      args.IsReady,
+		Id:            util.GenerateUUIDString(),
+		DataNodeId:    args.Id,
+		ChunkIds:      args.ChunkId,
+		IOLoad:        args.IOLoad,
+		FullCapacity:  args.FullCapacity,
+		UsedCapacity:  args.UsedCapacity,
+		SuccessInfos:  successInfos,
+		FailInfos:     failInfos,
+		InvalidChunks: args.InvalidChunks,
+		IsReady:       args.IsReady,
 	}
 	data := getData4Apply(operation, common.OperationHeartbeat)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
@@ -583,9 +585,9 @@ func (handler *MasterHandler) Callback4Add(ctx context.Context, args *pb.Callbac
 		Path:         args.FilePath,
 		Stage:        common.UnlockDic,
 	}
-	infos := make([]util.ChunkSendResult, len(args.Infos))
+	infos := make([]util.ChunkTaskResult, len(args.Infos))
 	for i, info := range args.Infos {
-		infos[i] = util.ChunkSendResult{
+		infos[i] = util.ChunkTaskResult{
 			ChunkId:          info.ChunkId,
 			SuccessDataNodes: info.SuccessNode,
 			FailDataNodes:    info.FailNode,
