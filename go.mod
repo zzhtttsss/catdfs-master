@@ -16,7 +16,7 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.4
 	go.uber.org/atomic v1.7.0
 	google.golang.org/grpc v1.50.1
-	tinydfs-base v0.0.0-00010101000000-000000000000
+	tinydfs-base v0.0.0-20211011100000-000000000000
 )
 
 require (
@@ -77,6 +77,6 @@ require (
 
 replace github.com/agiledragon/gomonkey => github.com/agiledragon/gomonkey/v2 v2.8.0
 
-replace tinydfs-base => github.com/zzhtttsss/catdfs-base v0.0.0-20221130032230-1454fab6dfad
+replace tinydfs-base => github.com/zzhtttsss/catdfs-base v1.1.0
 
 //replace tinydfs-base => ../catdfs-base
