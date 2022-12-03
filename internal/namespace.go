@@ -55,7 +55,7 @@ type FileNode struct {
 	ParentNode *FileNode
 	// ChildNodes includes all child FileNode of this node, using FileName as key.
 	ChildNodes map[string]*FileNode
-	// Chunks is id of all Chunk in this file.
+	// Chunks is id of all Chunk in this file whose data is current FileNode id + chunkIndex
 	Chunks []string
 	// Size is the size of the file. Use bytes as the unit of measurement which
 	// means 1kb will be 1024. The size of the directory is 0.
@@ -135,7 +135,7 @@ func initChunks(size int64, id string) []string {
 	nums := int(math.Ceil(float64(size) / float64(common.ChunkSize)))
 	chunks := make([]string, nums)
 	for i := 0; i < len(chunks); i++ {
-		chunks[i] = id + strconv.Itoa(i)
+		chunks[i] = util.CombineString(id, strconv.Itoa(i))
 	}
 	return chunks
 }
@@ -183,7 +183,7 @@ func removeFileNode(path string, isDummy bool) (*FileNode, error) {
 	}
 
 	delete(fileNode.ParentNode.ChildNodes, fileNode.FileName)
-	fileNode.FileName = deleteFilePrefix + fileNode.Id + deleteDelimiter + fileNode.FileName
+	fileNode.FileName = util.CombineString(deleteFilePrefix, fileNode.Id, deleteDelimiter, fileNode.FileName)
 	fileNode.ParentNode.ChildNodes[fileNode.FileName] = fileNode
 
 	fileNode.IsDel = true

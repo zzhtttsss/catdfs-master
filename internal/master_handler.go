@@ -39,7 +39,6 @@ func init() {
 	config.InitConfig()
 	Logger = config.InitLogger(Logger, true)
 	Logger.SetLevel(logrus.Level(viper.GetInt(common.MasterLogLevel)))
-
 }
 
 // MasterHandler represent a master node to handle all incoming requests.
@@ -104,7 +103,7 @@ func (handler *MasterHandler) initRaft() error {
 	if err != nil {
 		return err
 	}
-	handler.raftAddress = localIP + common.AddressDelimiter + viper.GetString(common.MasterRaftPort)
+	handler.raftAddress = util.CombineString(localIP, common.AddressDelimiter, viper.GetString(common.MasterRaftPort))
 	raftConfig.LocalID = raft.ServerID(handler.raftAddress)
 
 	handler.MonitorChan = make(chan bool, 1)
@@ -199,7 +198,7 @@ func (handler *MasterHandler) bootstrapOrJoinCluster() error {
 func (handler *MasterHandler) joinCluster(getResp *clientv3.GetResponse) (*pb.JoinClusterReply, error) {
 	ctx := context.Background()
 	addr := string(getResp.Kvs[0].Value)
-	addr = strings.Split(addr, common.AddressDelimiter)[0] + viper.GetString(common.MasterPort)
+	addr = util.CombineString(strings.Split(addr, common.AddressDelimiter)[0], viper.GetString(common.MasterPort))
 
 	conn, _ := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	client := pb.NewRaftServiceClient(conn)
@@ -225,7 +224,8 @@ func (handler *MasterHandler) putAndKeepFollower() {
 		Logger.Panicf("Fail to create lease with etcd, error detail: %s", err.Error())
 	}
 	handler.FollowerLeaseId = lease.ID
-	_, err = kv.Put(ctx, common.FollowerKeyPrefix+hostname, handler.raftAddress, clientv3.WithLease(lease.ID))
+	_, err = kv.Put(ctx, util.CombineString(common.FollowerKeyPrefix, hostname), handler.raftAddress,
+		clientv3.WithLease(lease.ID))
 
 	keepAliveChan, err := client.KeepAlive(ctx, lease.ID)
 	if err != nil {
@@ -242,7 +242,7 @@ func (handler *MasterHandler) putAndKeepFollower() {
 func (handler *MasterHandler) JoinCluster(ctx context.Context, args *pb.JoinClusterArgs) (*pb.JoinClusterReply, error) {
 	p, _ := peer.FromContext(ctx)
 	address := strings.Split(p.Addr.String(), common.AddressDelimiter)[0]
-	rAddress := address + common.AddressDelimiter + viper.GetString(common.MasterRaftPort)
+	rAddress := util.CombineString(address, common.AddressDelimiter, viper.GetString(common.MasterRaftPort))
 	Logger.Infof("Get request to join cluster, address : %s", rAddress)
 	cf := handler.Raft.GetConfiguration()
 
@@ -298,10 +298,7 @@ func (handler *MasterHandler) monitorCluster(ctx context.Context) {
 				}
 				handler.FollowerStateObserver = getFollowerStateObserver()
 				handler.Raft.RegisterObserver(handler.FollowerStateObserver)
-				go MonitorHeartbeat(subContext)
-				go ConsumePendingChunk(subContext)
-				go CheckChunks(subContext)
-				go CheckFileTree(subContext)
+				StartMonitor(subContext)
 				Logger.WithContext(ctx).Infof("Become leader, success to change etcd leader infomation and monitor datanodes")
 			} else {
 				handler.Raft.DeregisterObserver(handler.FollowerStateObserver)
@@ -333,7 +330,7 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 	p, _ := peer.FromContext(ctx)
 	address := strings.Split(p.Addr.String(), ":")[0]
 	Logger.WithContext(ctx).Infof("Get request for registering a datanode, address: %s", address)
-	need2Expand := IsNeed2Expand(len(args.ChunkIds))
+	need2Expand := IsNeed2Expand(int(args.UsedCapacity), int(args.FullCapacity))
 	dataNodeId := util.GenerateUUIDString()
 	// register first
 	operation := &RegisterOperation{
@@ -341,6 +338,8 @@ func (handler *MasterHandler) Register(ctx context.Context, args *pb.DNRegisterA
 		Address:      address,
 		DataNodeId:   dataNodeId,
 		ChunkIds:     args.ChunkIds,
+		FullCapacity: int(args.FullCapacity),
+		UsedCapacity: int(args.UsedCapacity),
 		IsNeedExpand: need2Expand,
 	}
 	data := getData4Apply(operation, common.OperationRegister)
@@ -385,13 +384,16 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 	successInfos := ConvChunkInfo(args.SuccessChunkInfos)
 	failInfos := ConvChunkInfo(args.FailChunkInfos)
 	operation := &HeartbeatOperation{
-		Id:           util.GenerateUUIDString(),
-		DataNodeId:   args.Id,
-		ChunkIds:     args.ChunkId,
-		IOLoad:       args.IOLoad,
-		SuccessInfos: successInfos,
-		FailInfos:    failInfos,
-		IsReady:      args.IsReady,
+		Id:            util.GenerateUUIDString(),
+		DataNodeId:    args.Id,
+		ChunkIds:      args.ChunkId,
+		IOLoad:        args.IOLoad,
+		FullCapacity:  args.FullCapacity,
+		UsedCapacity:  args.UsedCapacity,
+		SuccessInfos:  successInfos,
+		FailInfos:     failInfos,
+		InvalidChunks: args.InvalidChunks,
+		IsReady:       args.IsReady,
 	}
 	data := getData4Apply(operation, common.OperationHeartbeat)
 	applyFuture := handler.Raft.Apply(data, 5*time.Second)
@@ -422,11 +424,21 @@ func (handler *MasterHandler) Heartbeat(ctx context.Context, args *pb.HeartbeatA
 	return heartbeatReply, nil
 }
 
-// CheckArgs4Add is called by client. It checks whether the path and file name
-// entered by the user in the Add operation are legal.
+// CheckArgs4Add is called by client. It checks whether there is enough space
+// to store the file and the path and file name entered by the user in the Add
+// operation are legal.
 func (handler *MasterHandler) CheckArgs4Add(ctx context.Context, args *pb.CheckArgs4AddArgs) (*pb.CheckArgs4AddReply, error) {
 	Logger.WithContext(ctx).Infof("Get request for checking path and filename for add operation, path: %s, filename: %s, size: %d", args.Path, args.FileName, args.Size)
 	RequestCountInc(handler.SelfAddr, common.OperationAdd)
+	if int(StorableNum.Load()) < viper.GetInt(common.ReplicaNum) {
+		err := fmt.Errorf("insufficient free space in the catfs to store the file")
+		Logger.Errorf("Fail to check path and filename for add operation, error code: %v, error detail: %s,", common.MasterCheckArgs4AddFailed, err.Error())
+		details, _ := status.New(codes.Internal, err.Error()).WithDetails(&pb.RPCError{
+			Code: common.MasterCheckArgs4AddFailed,
+			Msg:  err.Error(),
+		})
+		return nil, details.Err()
+	}
 	operation := &AddOperation{
 		Id:         util.GenerateUUIDString(),
 		FileNodeId: util.GenerateUUIDString(),
@@ -493,6 +505,7 @@ func (handler *MasterHandler) CheckAndGet(ctx context.Context, args *pb.CheckAnd
 		FileNodeId:  fileNode.Id,
 		ChunkNum:    int32(len(fileNode.Chunks)),
 		OperationId: operation.Id,
+		FileSize:    fileNode.Size,
 	}
 	Logger.WithContext(ctx).Infof("Success to check path for get operation, path: %s", args.Path)
 	return rep, nil
@@ -572,9 +585,9 @@ func (handler *MasterHandler) Callback4Add(ctx context.Context, args *pb.Callbac
 		Path:         args.FilePath,
 		Stage:        common.UnlockDic,
 	}
-	infos := make([]util.ChunkSendResult, len(args.Infos))
+	infos := make([]util.ChunkTaskResult, len(args.Infos))
 	for i, info := range args.Infos {
-		infos[i] = util.ChunkSendResult{
+		infos[i] = util.ChunkTaskResult{
 			ChunkId:          info.ChunkId,
 			SuccessDataNodes: info.SuccessNode,
 			FailDataNodes:    info.FailNode,

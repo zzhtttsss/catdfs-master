@@ -13,6 +13,9 @@ master:
   #	DebugLevel = 5
   #	TraceLevel = 6
   logLevel: 5
+  storableCheckTime: 60
+  storableThreshold: 80
+  expandThreshold: 10
 
 # chunk server config
 chunk:

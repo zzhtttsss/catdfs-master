@@ -109,7 +109,7 @@ func BatchClearPendingDataNodes(chunkIds []string) {
 
 // BatchUpdatePendingDataNodes move all DataNode which have store the corresponding
 // Chunk successfully from that Chunk's pendingDataNodes to its dataNodes.
-func BatchUpdatePendingDataNodes(infos []util.ChunkSendResult) {
+func BatchUpdatePendingDataNodes(infos []util.ChunkTaskResult) {
 	updateChunksLock.Lock()
 	defer updateChunksLock.Unlock()
 	for _, info := range infos {
@@ -417,11 +417,20 @@ func UpdateChunk4Heartbeat(o HeartbeatOperation) {
 		if chunk, ok := chunksMap[info.ChunkId]; ok {
 			chunk.pendingDataNodes.Remove(info.DataNodeId)
 			chunk.dataNodes.Add(info.DataNodeId)
+			if info.SendType == common.MoveSendType {
+				chunk.dataNodes.Remove(o.DataNodeId)
+			}
 		}
 	}
 	for _, info := range o.FailInfos {
 		if chunk, ok := chunksMap[info.ChunkId]; ok {
 			chunk.pendingDataNodes.Remove(info.DataNodeId)
+		}
+	}
+	for _, chunkId := range o.InvalidChunks {
+		if chunk, ok := chunksMap[chunkId]; ok {
+			chunk.dataNodes.Remove(o.DataNodeId)
+			pendingChunkQueue.Push(String(chunkId))
 		}
 	}
 }

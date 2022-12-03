@@ -7,6 +7,8 @@ import (
 	set "github.com/deckarep/golang-set"
 	"github.com/hashicorp/raft"
 	"github.com/spf13/viper"
+	"go.uber.org/atomic"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +25,9 @@ const (
 	addressIdx
 	dnChunksIdx
 	ioLoadIdx
+	fullCapacityIdx
+	usedCapacityIdx
+	fsChunksIdx
 	heartbeatIdx
 )
 
@@ -32,7 +37,7 @@ var (
 	updateMapLock = &sync.RWMutex{}
 	// dataNodeHeap is a max heap with capacity "ReplicaNum". It is used to store
 	// the first "ReplicaNum" dataNodes with the least number of memory blocks.
-	// This heap will not actively keep the latest status. So if you want to get
+	// This heap will not actively keep the latest Status. So if you want to get
 	// the latest dataNodeHeap, you must call AllocateDataNodes to update dataNodeHeap
 	// first.
 	dataNodeHeap = DataNodeHeap{
@@ -40,21 +45,26 @@ var (
 		less: &MaxHeapFunc{},
 	}
 	updateHeapLock = &sync.RWMutex{}
+	StorableNum    = atomic.Int64{}
 )
 
 // DataNode represents a chunkserver in the file system.
 type DataNode struct {
 	Id string
-	// status 0 died; 1 alive
-	status  int
+	// Status 0 died; 1 alive
+	Status  int
 	Address string
 	// Chunks includes all Chunk's id stored in this DataNode.
 	Chunks set.Set
-	// Deprecated: Leases includes Chunk's id that primary DataNode is this DataNode.
-	Leases set.Set
 	// IOLoad represents IO load of a DataNode. It is flushed by DataNode's heartbeat,
 	// so it will have a delay of a few seconds.
 	IOLoad int
+	// FullCapacity represents the full capacity of a DataNode. It is flushed by DataNode's
+	// heartbeat, so it will have a delay of a few seconds.
+	FullCapacity int
+	// UsedCapacity represents the used capacity of a DataNode. It is flushed by DataNode's
+	// heartbeat, so it will have a delay of a few seconds.
+	UsedCapacity int
 	// FutureSendChunks include ChunkSendInfo that means this DataNode should send
 	// which Chunk to Which DataNode, and the value represent the state of sending.
 	FutureSendChunks map[ChunkSendInfo]int
@@ -72,9 +82,15 @@ func (d *DataNode) String() string {
 		chunks[index] = chunkId.(string)
 		index++
 	}
+	fsChunks := make([]string, len(d.FutureSendChunks))
+	index = 0
+	for info, s := range d.FutureSendChunks {
+		fsChunks[index] = fmt.Sprintf("%s@%s@%v@%v", info.ChunkId, info.DataNodeId, info.SendType, s)
+	}
 
-	res.WriteString(fmt.Sprintf("%s$%v$%s$%v$%v$%s\n",
-		d.Id, d.status, d.Address, chunks, d.IOLoad, d.HeartbeatTime.Format(common.LogFileTimeFormat)))
+	res.WriteString(fmt.Sprintf("%s$%v$%s$%v$%v$%v$%v$%v$%s\n",
+		d.Id, d.Status, d.Address, chunks, d.IOLoad, d.FullCapacity, d.UsedCapacity, fsChunks,
+		d.HeartbeatTime.Format(common.LogFileTimeFormat)))
 	return res.String()
 }
 
@@ -139,20 +155,33 @@ func UpdateDataNode4Heartbeat(o HeartbeatOperation) ([]ChunkSendInfo, bool) {
 	if !ok {
 		return nil, false
 	}
+	dataNode.FullCapacity = int(o.FullCapacity)
+	dataNode.UsedCapacity = int(o.UsedCapacity)
 	dataNode.HeartbeatTime = time.Now()
 	if o.IsReady {
-		dataNode.status = common.Alive
+		dataNode.Status = common.Alive
 	}
 	dataNode.IOLoad = int(o.IOLoad)
 	for _, info := range o.SuccessInfos {
 		delete(dataNode.FutureSendChunks, info)
+		if info.SendType == common.MoveSendType || info.SendType == common.DeleteSendType {
+			dataNode.Chunks.Remove(info.ChunkId)
+		}
+		// If SendType is delete, ok is false.
 		if dataNodeS, ok := dataNodeMap[info.DataNodeId]; ok {
 			dataNodeS.Chunks.Add(info.ChunkId)
 		}
 	}
 	for _, info := range o.FailInfos {
 		delete(dataNode.FutureSendChunks, info)
+		// No need to handle move or delete chunk failure.
+		if info.SendType == common.MoveSendType || info.SendType == common.DeleteSendType {
+			continue
+		}
 		pendingChunkQueue.Push(String(info.ChunkId))
+	}
+	for _, chunkId := range o.InvalidChunks {
+		dataNode.Chunks.Remove(chunkId)
 	}
 	nextChunkInfos := make([]ChunkSendInfo, 0, len(dataNode.FutureSendChunks))
 	Logger.Debugf("[DataNode = %s] FutureSendChunks: %v", dataNode.Id, dataNode.FutureSendChunks)
@@ -173,7 +202,7 @@ func GetSortedDataNodeIds(set set.Set) ([]string, []string) {
 	dns := make([]*DataNode, 0)
 	for id := range setChan {
 		if node, ok := dataNodeMap[id.(string)]; ok {
-			if node.status == common.Alive {
+			if node.Status == common.Alive {
 				dns = append(dns, dataNodeMap[id.(string)])
 			}
 		}
@@ -198,7 +227,7 @@ func GetAliveDataNodeIds() []string {
 	defer updateMapLock.RUnlock()
 	ids := make([]string, 0, len(dataNodeMap))
 	for id, node := range dataNodeMap {
-		if node.status == common.Alive {
+		if node.Status == common.Alive {
 			ids = append(ids, id)
 		}
 	}
@@ -232,7 +261,7 @@ func BatchApplyPlan2DataNode(receiverPlan []int, senderPlan []int, chunkIds []st
 	}
 }
 
-func BatchAddChunks(infos []util.ChunkSendResult) {
+func BatchAddChunks(infos []util.ChunkTaskResult) {
 	updateMapLock.Lock()
 	defer updateMapLock.Unlock()
 	for _, info := range infos {
@@ -287,7 +316,7 @@ func DegradeDataNode(dataNodeId string, stage int) {
 		return
 	}
 	if stage == common.Degrade2Waiting {
-		dataNode.status = common.Waiting
+		dataNode.Status = common.Waiting
 		return
 	}
 	delete(dataNodeMap, dataNodeId)
@@ -312,7 +341,7 @@ func AllocateDataNodes() []*DataNode {
 	updateHeapLock.Lock()
 	dataNodeHeap.dns = dataNodeHeap.dns[0:0]
 	for _, node := range dataNodeMap {
-		if node.status == common.Alive {
+		if node.Status == common.Alive {
 			adjust(node)
 		}
 	}
@@ -332,7 +361,7 @@ func BatchAllocateDataNodes(chunkNum int) [][]*DataNode {
 	processMap := make(map[*DataNode]int)
 	allDataNodes := make([][]*DataNode, chunkNum)
 	for _, node := range dataNodeMap {
-		if node.status == common.Alive {
+		if node.Status == common.Alive {
 			processMap[node] = 0
 		}
 	}
@@ -340,14 +369,14 @@ func BatchAllocateDataNodes(chunkNum int) [][]*DataNode {
 		// Todo if Chunk num is same, choose the DataNode with less IOLoad.
 		dataNodeHeap.dns = dataNodeHeap.dns[0:0]
 		for _, node := range dataNodeMap {
-			if node.status == common.Alive {
+			if node.Status == common.Alive {
 				adjust4batch(node, processMap)
 			}
 		}
 		currentDataNodes := make([]*DataNode, dataNodeHeap.Len())
 		copy(currentDataNodes, dataNodeHeap.dns)
 		for _, node := range currentDataNodes {
-			processMap[node] += 1
+			processMap[node] += common.ChunkSize
 		}
 		allDataNodes[i] = currentDataNodes
 	}
@@ -363,7 +392,7 @@ func adjust(node *DataNode) {
 		heap.Push(&dataNodeHeap, node)
 	} else {
 		topNode := heap.Pop(&dataNodeHeap).(*DataNode)
-		if topNode.Chunks.Cardinality() > node.Chunks.Cardinality() {
+		if topNode.CalUsage(0) > node.CalUsage(0) {
 			heap.Push(&dataNodeHeap, node)
 		} else {
 			heap.Push(&dataNodeHeap, topNode)
@@ -381,12 +410,35 @@ func adjust4batch(node *DataNode, processMap map[*DataNode]int) {
 		heap.Push(&dataNodeHeap, node)
 	} else {
 		topNode := heap.Pop(&dataNodeHeap).(*DataNode)
-		if topNode.Chunks.Cardinality()+processMap[topNode] > node.Chunks.Cardinality()+processMap[node] {
+		if topNode.CalUsage(processMap[topNode]) > node.CalUsage(processMap[node]) {
 			heap.Push(&dataNodeHeap, node)
 		} else {
 			heap.Push(&dataNodeHeap, topNode)
 		}
 	}
+}
+
+func (d *DataNode) CalUsage(temp int) int {
+	return CalUsage(d.UsedCapacity, d.FullCapacity, temp)
+}
+
+func CalAvgUsage() int {
+	updateMapLock.RLock()
+	defer updateMapLock.RUnlock()
+	usedSum := 0
+	fullSum := 0
+	if len(dataNodeMap) == 0 {
+		return 0
+	}
+	for _, node := range dataNodeMap {
+		usedSum += node.UsedCapacity
+		fullSum += node.FullCapacity
+	}
+	return usedSum * 100 / fullSum
+}
+
+func CalUsage(usedCapacity int, fullCapacity int, temp int) int {
+	return int(math.Ceil(float64(usedCapacity+temp) / float64(fullCapacity) * 100))
 }
 
 // PersistDataNodes writes all DataNode in dataNodeMap to the sink for persistence.
@@ -425,24 +477,41 @@ func RestoreDataNodes(buf *bufio.Scanner) error {
 		heartbeatTime, _ := time.Parse(common.LogFileTimeFormat, data[heartbeatIdx])
 		status, _ := strconv.Atoi(data[statusIdx])
 		ioLoad, _ := strconv.Atoi(data[ioLoadIdx])
+		fullCapacity, _ := strconv.Atoi(data[fullCapacityIdx])
+		usedCapacity, _ := strconv.Atoi(data[usedCapacityIdx])
+		fsChunksLen := len(data[fsChunksIdx])
+		futureSendChunks := make(map[ChunkSendInfo]int, fsChunksLen)
+		fsChunksData := data[dnChunksIdx][1 : chunksLen-1]
+		for _, s := range strings.Split(fsChunksData, " ") {
+			fsChunk := strings.Split(s, "@")
+			sendType, _ := strconv.Atoi(fsChunk[2])
+			state, _ := strconv.Atoi(fsChunk[3])
+			futureSendChunks[ChunkSendInfo{
+				ChunkId:    fsChunk[0],
+				DataNodeId: fsChunk[1],
+				SendType:   sendType,
+			}] = state
+		}
 		dataNodeMap[data[dataNodeIdIdx]] = &DataNode{
-			Id:            data[dataNodeIdIdx],
-			status:        status,
-			Address:       data[addressIdx],
-			Chunks:        chunks,
-			IOLoad:        ioLoad,
-			HeartbeatTime: heartbeatTime,
+			Id:               data[dataNodeIdIdx],
+			Status:           status,
+			Address:          data[addressIdx],
+			Chunks:           chunks,
+			IOLoad:           ioLoad,
+			FullCapacity:     fullCapacity,
+			UsedCapacity:     usedCapacity,
+			FutureSendChunks: futureSendChunks,
+			HeartbeatTime:    heartbeatTime,
 		}
 	}
 	return nil
 }
 
 // IsNeed2Expand finds out whether to expand.
-func IsNeed2Expand(newChunkNum int) bool {
-	avgChunkNum := GetAvgChunkNum()
-	diff := avgChunkNum - newChunkNum
-	// TODO 磁盘占有率
-	return diff > 1
+func IsNeed2Expand(usedCapacity int, fullCapacity int) bool {
+	avgUsage := CalAvgUsage()
+	currentUsage := CalUsage(usedCapacity, fullCapacity, 0)
+	return avgUsage-currentUsage > viper.GetInt(common.ExpandThreshold)
 }
 
 func GetAvgChunkNum() int {
@@ -462,8 +531,9 @@ func GetAvgChunkNum() int {
 // DoExpand gets the chunk copied according to this new dataNode.
 func DoExpand(dataNode *DataNode) int {
 	Logger.Infof("Start to expand with dataNode %s", dataNode.Id)
+	currentUsage := dataNode.CalUsage(0)
 	var (
-		pendingCount  = GetAvgChunkNum()
+		pendingCount  = (CalAvgUsage()-currentUsage)*dataNode.FullCapacity/(100*common.ChunkSize) + 1
 		selfChunks    = dataNode.Chunks
 		pendingChunks = set.NewSet()
 		pendingMap    = map[string][]string{}
@@ -472,7 +542,7 @@ For:
 	for {
 		notFound := true
 		for _, node := range dataNodeMap {
-			if node.status == common.Alive {
+			if node.Status == common.Alive {
 				for chunk := range node.Chunks.Iter() {
 					if !pendingChunks.Contains(chunk) && !selfChunks.Contains(chunk) {
 						notFound = false

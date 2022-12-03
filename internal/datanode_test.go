@@ -6,56 +6,9 @@ import (
 	set "github.com/deckarep/golang-set"
 	"github.com/stretchr/testify/assert"
 	"testing"
-	"time"
 	"tinydfs-base/common"
 	"tinydfs-base/util"
 )
-
-func TestMain(m *testing.M) {
-	dataNodeMap = map[string]*DataNode{
-		"dn1": {
-			Id:            "dn1",
-			status:        common.Alive,
-			Address:       "dn1:6789",
-			Chunks:        set.NewSetWith("chunk1", "chunk2", "chunk3"),
-			Leases:        set.NewSetWith("chunk1"),
-			HeartbeatTime: time.Time{},
-		},
-		"dn2": {
-			Id:            "dn2",
-			status:        common.Alive,
-			Address:       "dn2:6789",
-			Chunks:        set.NewSetWith("chunk1", "chunk2", "chunk3", "chunk4", "chunk5", "chunk6"),
-			Leases:        set.NewSet(),
-			HeartbeatTime: time.Time{},
-		},
-		"dn3": {
-			Id:            "dn3",
-			status:        common.Alive,
-			Address:       "dn3:6789",
-			Chunks:        set.NewSetWith("chunk1", "chunk2", "chunk4"),
-			Leases:        set.NewSetWith("chunk4"),
-			HeartbeatTime: time.Time{},
-		},
-		"dn4": {
-			Id:            "dn4",
-			status:        common.Alive,
-			Address:       "dn4:6789",
-			Chunks:        set.NewSetWith("chunk3", "chunk5", "chunk6"),
-			Leases:        set.NewSet(),
-			HeartbeatTime: time.Time{},
-		},
-		"dn5": {
-			Id:            "dn5",
-			status:        common.Alive,
-			Address:       "dn5:6789",
-			Chunks:        set.NewSetWith("chunk4", "chunk6"),
-			Leases:        set.NewSet(),
-			HeartbeatTime: time.Time{},
-		},
-	}
-	m.Run()
-}
 
 type stu struct {
 	a set.Set
@@ -100,7 +53,7 @@ func TestDegradeDataNode(t *testing.T) {
 			Setup: func(t *testing.T) {
 				dataNodeMap["dataNode1"] = &DataNode{
 					Id:     "dataNode1",
-					status: common.Waiting,
+					Status: common.Waiting,
 					Chunks: set.NewSet("chunk1", "chunk2", "chunk3"),
 					FutureSendChunks: map[ChunkSendInfo]int{
 						ChunkSendInfo{ChunkId: "chunk1", DataNodeId: "dataNode2"}: common.WaitToInform,
@@ -127,7 +80,7 @@ func TestDegradeDataNode(t *testing.T) {
 			Setup: func(t *testing.T) {
 				dataNodeMap["dataNode1"] = &DataNode{
 					Id:     "dataNode1",
-					status: common.Alive,
+					Status: common.Alive,
 				}
 				batchClearDataNode := gomonkey.ApplyFunc(BatchClearDataNode, func(_ []interface{}, _ string) {})
 				t.Cleanup(func() {
@@ -149,7 +102,7 @@ func TestDegradeDataNode(t *testing.T) {
 			}
 			DegradeDataNode(tt.args.dataNodeId, tt.args.stage)
 			if tt.name == "Degrade2Waiting" {
-				assert.Equal(t, tt.wantStatus, dataNodeMap[tt.args.dataNodeId].status, "Unexpected status.")
+				assert.Equal(t, tt.wantStatus, dataNodeMap[tt.args.dataNodeId].Status, "Unexpected Status.")
 			}
 			assert.Equal(t, tt.wantLen, pendingChunkQueue.Len(), "Unexpected len.")
 		})
